@@ -53,15 +53,20 @@ function formatarChave(chave) {
   return chave.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase())
 }
 
+// Simplifica objetos/listas comuns do Betha pra exibição em relatório — mostra
+// só o dado que interessa em vez do objeto/array inteiro. Ex.:
+// - contratacao: { numeroTermo, ano, ... } -> "86/2025"
+// - tipoAditivo: { descricao, classificacao } -> "Aditivo de Prazo e Valor (Acréscimo)"
+// - arquivos: [{ nome, id, tipo }, ...] -> "arquivo1.pdf, arquivo2.pdf"
 function valorTexto(v) {
   if (v == null) return ''
-  // Referência a uma contratação (ex.: campo "contratacao" do aditivo) —
-  // mostra só "numeroTermo/ano" (ex.: "86/2025") em vez do objeto inteiro,
-  // que traz dezenas de campos irrelevantes pro relatório.
-  if (typeof v === 'object' && v.numeroTermo != null) {
-    return v.ano != null ? `${v.numeroTermo}/${v.ano}` : String(v.numeroTermo)
+  if (Array.isArray(v)) return v.map((item) => valorTexto(item)).join(', ')
+  if (typeof v === 'object') {
+    if (v.numeroTermo != null) return v.ano != null ? `${v.numeroTermo}/${v.ano}` : String(v.numeroTermo)
+    if (v.descricao != null) return String(v.descricao)
+    if (v.nome != null) return String(v.nome)
+    return JSON.stringify(v)
   }
-  if (typeof v === 'object') return JSON.stringify(v)
   return String(v)
 }
 

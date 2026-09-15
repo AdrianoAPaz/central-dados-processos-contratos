@@ -144,16 +144,21 @@ function formatarData(data: Date | null): string | null {
   return data ? data.toISOString().slice(0, 10) : null;
 }
 
+// Simplifica objetos/listas comuns do Betha pra exibição em relatório —
+// mostra só o dado que interessa em vez do objeto/array inteiro. Ex.:
+// - contratacao: { numeroTermo, ano, ... } -> "86/2025"
+// - tipoAditivo: { descricao, classificacao } -> "Aditivo de Prazo e Valor (Acréscimo)"
+// - arquivos: [{ nome, id, tipo }, ...] -> "arquivo1.pdf, arquivo2.pdf"
 function valorCelula(v: unknown): string | number {
   if (v == null) return '';
   if (typeof v === 'number' || typeof v === 'string') return v;
   if (typeof v === 'boolean') return String(v);
-  // Referência a uma contratação (ex.: campo "contratacao" do aditivo) —
-  // mostra só "numeroTermo/ano" (ex.: "86/2025") em vez do objeto inteiro,
-  // que traz dezenas de campos irrelevantes pro relatório.
-  if (typeof v === 'object' && v !== null && 'numeroTermo' in v) {
+  if (Array.isArray(v)) return v.map((item) => valorCelula(item)).join(', ');
+  if (typeof v === 'object') {
     const obj = v as Record<string, unknown>;
-    return obj.ano != null ? `${obj.numeroTermo}/${obj.ano}` : String(obj.numeroTermo);
+    if (obj.numeroTermo != null) return obj.ano != null ? `${obj.numeroTermo}/${obj.ano}` : String(obj.numeroTermo);
+    if (obj.descricao != null) return String(obj.descricao);
+    if (obj.nome != null) return String(obj.nome);
   }
   return JSON.stringify(v);
 }
