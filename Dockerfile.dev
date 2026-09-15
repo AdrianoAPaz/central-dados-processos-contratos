@@ -1,0 +1,22 @@
+# Imagem de DESENVOLVIMENTO — instala tudo (com devDependencies) e roda em
+# modo watch. Não confundir com o Dockerfile da raiz, que é o de produção
+# (build otimizado, só deps de produção). Ver docker-compose.dev.yml.
+FROM node:20-slim
+WORKDIR /app
+
+# node:20-slim não vem com OpenSSL — sem isso o motor do Prisma nem carrega
+# (erro só aparece em runtime, não no build, então é fácil passar batido).
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json* ./
+COPY frontend/package.json frontend/package.json
+COPY backend/package.json backend/package.json
+RUN npm install
+
+COPY . .
+
+# O postinstall do @prisma/client já rodou lá em cima, mas antes do schema
+# existir na imagem — gera de novo agora que o código já foi copiado.
+RUN npm run db:generate -w backend
+
+CMD ["npm", "run", "dev"]

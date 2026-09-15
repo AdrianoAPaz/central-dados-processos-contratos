@@ -1,0 +1,48 @@
+# Ambiente de desenvolvimento — caminho preferido (CLAUDE.md 1.2): sobe
+# Postgres + backend + frontend juntos, ninguém precisa instalar Node/npm na
+# máquina. Uso: `docker compose -f docker-compose.dev.yml up -d --build`,
+# depois `docker compose -f docker-compose.dev.yml exec app npm run db:migrate -w backend`
+# na primeira vez, e abrir http://localhost:5183.
+#
+# Não é obrigatório — quem preferir (ou não conseguir instalar Docker) roda
+# só o Postgres daqui e usa `npm install` + `npm run dev` direto. Ver README.md.
+services:
+  postgres:
+    image: postgres:16
+    container_name: central-dados-processos-contratos-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: central_dados_processos_contratos
+      POSTGRES_PASSWORD: central_dados_processos_contratos
+      POSTGRES_DB: central_dados_processos_contratos
+    ports:
+      - '5433:5432'
+    volumes:
+      - central-dados-processos-contratos-dev-postgres-data:/var/lib/postgresql/data
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: central-dados-processos-contratos-dev-app
+    env_file: .env
+    environment:
+      # Dentro do Docker o Postgres é alcançado pelo nome do serviço, não por
+      # "localhost:5433" (isso só vale de fora, feito pelo host) — CLAUDE.md 1.1.
+      DATABASE_URL: postgresql://central_dados_processos_contratos:central_dados_processos_contratos@postgres:5432/central_dados_processos_contratos
+      CHOKIDAR_USEPOLLING: 'true'
+    ports:
+      - '8090:8090'
+      - '5183:5183'
+    volumes:
+      - .:/app
+      # node_modules ficam só dentro do container: os do host podem ter
+      # binários nativos (o motor do Prisma) compilados pro SO errado.
+      - /app/node_modules
+      - /app/frontend/node_modules
+      - /app/backend/node_modules
+    depends_on:
+      - postgres
+
+volumes:
+  central-dados-processos-contratos-dev-postgres-data:

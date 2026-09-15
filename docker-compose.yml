@@ -1,0 +1,12 @@
+services:
+  central-dados-processos-contratos:
+    build:
+      context: .
+    container_name: central-dados-processos-contratos
+    restart: always
+    env_file: .env
+    networks: [network_public]
+
+networks:
+  network_public:
+    external: true

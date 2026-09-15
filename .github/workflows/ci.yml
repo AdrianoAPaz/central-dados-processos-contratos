@@ -1,0 +1,28 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install
+
+      # OBRIGATÓRIO antes de typecheck/build. `npm install` não gera o Prisma Client de
+      # forma confiável em workspaces, e sem ele o `@prisma/client` é o stub vazio: o `tsc`
+      # quebra com dezenas de "has no exported member 'User'". Na máquina de quem
+      # desenvolve passa, porque o client já foi gerado alguma vez — em CI, do zero, não.
+      # O Dockerfile já fazia na ordem certa; era só este workflow que não fazia.
+      - run: npm run db:generate -w backend
+
+      - run: npm run lint
+      - run: npm run typecheck -w frontend
+      - run: npm run typecheck -w backend
+      - run: npm run build

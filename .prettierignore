@@ -1,0 +1,9 @@
+dist
+build
+node_modules
+backend/prisma/migrations
+package-lock.json
+
+# Prosa (deploy-guide.md, KEYCLOAK.md, CLAUDE.md, READMEs) fica no estilo de
+# quem escreveu — Prettier é pra código, não pra documentação em texto livre.
+*.md

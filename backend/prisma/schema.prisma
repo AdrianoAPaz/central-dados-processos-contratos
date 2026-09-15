@@ -1,0 +1,12 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Sem models ainda — este projeto não usa login (CLAUDE.md 1.5), então não
+// há um model User de exemplo. Adicione seus models aqui e rode
+// `npm run db:migrate` pra gerar a primeira migration.
