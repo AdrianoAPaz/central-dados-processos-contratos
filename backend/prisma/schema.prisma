@@ -51,6 +51,7 @@ model Contrato {
   dadosBrutos Json @map("dados_brutos")
 
   aditivos Aditivo[]
+  itens    Item[]
 
   criadoEm     DateTime @default(now()) @map("criado_em")
   atualizadoEm DateTime @updatedAt @map("atualizado_em")
@@ -79,6 +80,30 @@ model Aditivo {
   dadosBrutos Json     @map("dados_brutos")
   criadoEm    DateTime @default(now()) @map("criado_em")
 
+  itens Item[]
+
   @@unique([contratoId, ordem])
   @@map("aditivo")
+}
+
+// Um item do sub-recurso `contratacoes/{id}/itens` — do contrato em si
+// (aditivoId nulo) ou de um aditivo específico (aditivoId preenchido,
+// contratacoes/{id}/aditivos/{aditivoId}/itens, caminho ainda não
+// confirmado ao vivo). Mesmo motivo do model Aditivo pra não achatar
+// campos: catálogo completo não confirmado, guardamos o JSON cru.
+model Item {
+  id         String   @id @default(cuid())
+  contratoId String   @map("contrato_id")
+  contrato   Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+
+  aditivoId String?  @map("aditivo_id")
+  aditivo   Aditivo? @relation(fields: [aditivoId], references: [id], onDelete: Cascade)
+
+  ordem Int
+
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  @@unique([contratoId, aditivoId, ordem])
+  @@map("item")
 }

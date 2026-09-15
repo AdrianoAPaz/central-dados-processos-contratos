@@ -91,18 +91,48 @@ contratosRouter.post('/', async (req, res) => {
     update: dados,
   });
 
-  // Aditivos vêm num campo à parte no corpo (contrato.aditivos = [...],
-  // buscado pela extensão em contratacoes/{id}/aditivos) — nunca dentro de
-  // `dadosBrutos` do contrato em si. Reimportar sempre substitui os
-  // anteriores (evita duplicar/deixar aditivo removido no Betha órfão aqui).
-  const aditivosRecebidos = Array.isArray(body.aditivos) ? (body.aditivos as Record<string, unknown>[]) : [];
+  // Aditivos e itens vêm em campos à parte no corpo (buscados pela extensão
+  // em contratacoes/{id}/aditivos e contratacoes/{id}/itens) — nunca dentro
+  // de `dadosBrutos` do contrato em si. Reimportar sempre substitui os
+  // anteriores (evita duplicar/deixar registro removido no Betha órfão
+  // aqui). Deletar os aditivos já cria em cascata a remoção dos itens deles.
   await prisma.aditivo.deleteMany({ where: { contratoId: contrato.id } });
-  if (aditivosRecebidos.length) {
-    await prisma.aditivo.createMany({
-      data: aditivosRecebidos.map((raw, index) => ({
+  await prisma.item.deleteMany({ where: { contratoId: contrato.id, aditivoId: null } });
+
+  const aditivosRecebidos = Array.isArray(body.aditivos) ? (body.aditivos as Record<string, unknown>[]) : [];
+  for (let i = 0; i < aditivosRecebidos.length; i++) {
+    const raw = aditivosRecebidos[i];
+    const { itens: itensDoAditivoRaw, ...dadosAditivo } = raw;
+    const itensDoAditivo = Array.isArray(itensDoAditivoRaw) ? (itensDoAditivoRaw as Record<string, unknown>[]) : [];
+
+    const aditivoCriado = await prisma.aditivo.create({
+      data: {
         contratoId: contrato.id,
-        ordem: index + 1,
+        ordem: i + 1,
         sequencial: extrairIdentificadorAditivo(raw),
+        dadosBrutos: dadosAditivo as Prisma.InputJsonObject,
+      },
+    });
+
+    if (itensDoAditivo.length) {
+      await prisma.item.createMany({
+        data: itensDoAditivo.map((itemRaw, j) => ({
+          contratoId: contrato.id,
+          aditivoId: aditivoCriado.id,
+          ordem: j + 1,
+          dadosBrutos: itemRaw as Prisma.InputJsonObject,
+        })),
+      });
+    }
+  }
+
+  const itensDoContrato = Array.isArray(body.itens) ? (body.itens as Record<string, unknown>[]) : [];
+  if (itensDoContrato.length) {
+    await prisma.item.createMany({
+      data: itensDoContrato.map((raw, i) => ({
+        contratoId: contrato.id,
+        aditivoId: null,
+        ordem: i + 1,
         dadosBrutos: raw as Prisma.InputJsonObject,
       })),
     });
@@ -137,20 +167,41 @@ const CAMPOS_RELATORIO: Array<{ label: string; valor: (c: NonNullable<Awaited<Re
   { label: 'Valor original (R$)', valor: (c) => (c.valorOriginal != null ? Number(c.valorOriginal) : null) },
   { label: 'Valor de aditivos (R$)', valor: (c) => (c.valorAditivos != null ? Number(c.valorAditivos) : null) },
   { label: 'Valor de solicitações de fornecimento (R$)', valor: (c) => (c.valorSolFornec != null ? Number(c.valorSolFornec) : null) },
+  { label: 'Quantidade de itens', valor: (c) => c.itens.length },
   { label: 'Quantidade de aditivos', valor: (c) => c.aditivos.length },
 ];
 
+// Datas SEMPRE em dd/mm/aaaa neste relatório — nunca ISO (aaaa-mm-dd).
+function formatarDataBr(d: Date): string {
+  const dia = String(d.getUTCDate()).padStart(2, '0');
+  const mes = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const ano = d.getUTCFullYear();
+  return `${dia}/${mes}/${ano}`;
+}
+
 function formatarData(data: Date | null): string | null {
-  return data ? data.toISOString().slice(0, 10) : null;
+  return data ? formatarDataBr(data) : null;
+}
+
+// Detecta string de data ISO (ex.: "2025-06-01" ou "2025-06-01T00:00:00Z")
+// entre os campos dinâmicos de aditivo/item — o catálogo desses sub-recursos
+// não define tipos, então datas chegam como string solta, não como Date.
+function pareceDataIso(v: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?/.test(v);
 }
 
 // Simplifica objetos/listas comuns do Betha pra exibição em relatório —
-// mostra só o dado que interessa em vez do objeto/array inteiro. Ex.:
+// mostra só o dado que interessa em vez do objeto/array/string bruta. Ex.:
+// - "2025-06-01T00:00:00Z" -> "01/06/2025"
 // - contratacao: { numeroTermo, ano, ... } -> "86/2025"
 // - tipoAditivo: { descricao, classificacao } -> "Aditivo de Prazo e Valor (Acréscimo)"
 // - arquivos: [{ nome, id, tipo }, ...] -> "arquivo1.pdf, arquivo2.pdf"
 function valorCelula(v: unknown): string | number {
   if (v == null) return '';
+  if (typeof v === 'string' && pareceDataIso(v)) {
+    const d = new Date(v);
+    if (!Number.isNaN(d.getTime())) return formatarDataBr(d);
+  }
   if (typeof v === 'number' || typeof v === 'string') return v;
   if (typeof v === 'boolean') return String(v);
   if (Array.isArray(v)) return v.map((item) => valorCelula(item)).join(', ');
@@ -166,8 +217,53 @@ function valorCelula(v: unknown): string | number {
 function buscarContrato(id: string) {
   return prisma.contrato.findUnique({
     where: { id },
-    include: { aditivos: { orderBy: { ordem: 'asc' } } },
+    include: {
+      itens: { where: { aditivoId: null }, orderBy: { ordem: 'asc' } },
+      aditivos: {
+        orderBy: { ordem: 'asc' },
+        include: { itens: { orderBy: { ordem: 'asc' } } },
+      },
+    },
   });
+}
+
+// Rótulo usado pra identificar de qual aditivo uma linha de item veio —
+// mesmo formato da coluna "Nº do aditivo" da aba Aditivos.
+function rotuloAditivo(aditivo: { ordem: number; sequencial: number | null }): string {
+  return aditivo.sequencial != null ? `${aditivo.ordem} (seq. ${aditivo.sequencial})` : String(aditivo.ordem);
+}
+
+// Gera colunas dinâmicas (união das chaves de todos os registros) + preenche
+// uma planilha — usado tanto pra Itens do Contrato quanto pra Itens dos
+// Aditivos, sempre com uma primeira coluna fixa de identificação.
+function preencherPlanilhaDinamica(
+  planilha: ExcelJS.Worksheet,
+  colunaFixa: { header: string; key: string; width: number },
+  linhas: Array<{ __fixo: string; raw: Record<string, unknown> }>,
+) {
+  const colunas: string[] = [];
+  const vistas = new Set<string>();
+  for (const linha of linhas) {
+    if (linha.raw && typeof linha.raw === 'object') {
+      for (const chave of Object.keys(linha.raw)) {
+        if (!vistas.has(chave)) {
+          vistas.add(chave);
+          colunas.push(chave);
+        }
+      }
+    }
+  }
+
+  planilha.columns = [colunaFixa, ...colunas.map((chave) => ({ header: chave, key: chave, width: 24 }))];
+  planilha.getRow(1).font = { bold: true };
+
+  for (const linha of linhas) {
+    const registro: Record<string, unknown> = { [colunaFixa.key]: linha.__fixo };
+    for (const chave of colunas) {
+      registro[chave] = valorCelula(linha.raw[chave]);
+    }
+    planilha.addRow(registro);
+  }
 }
 
 contratosRouter.get('/:id/relatorio', async (req, res) => {
@@ -189,6 +285,18 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
     planilha.addRow({ campo: campo.label, valor: campo.valor(contrato) ?? '' });
   }
 
+  // Itens do contrato — abaixo dos dados do contrato num sentido lógico
+  // (aba própria, já que Excel não empilha tabelas de tamanhos diferentes
+  // na mesma planilha de forma legível).
+  if (contrato.itens.length > 0) {
+    const planilhaItens = workbook.addWorksheet('Itens do Contrato');
+    preencherPlanilhaDinamica(
+      planilhaItens,
+      { header: 'Nº do item', key: '__numero', width: 14 },
+      contrato.itens.map((item) => ({ __fixo: String(item.ordem), raw: item.dadosBrutos as Record<string, unknown> })),
+    );
+  }
+
   // Cada aditivo vira uma LINHA própria numa aba separada — sempre
   // identificado pelo nº de ordem (+ o sequencial do próprio aditivo, quando
   // existir), pra nunca misturar os dados de aditivos diferentes na mesma
@@ -197,36 +305,23 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
   // não foi confirmado ao vivo — ver mapearContrato acima).
   if (contrato.aditivos.length > 0) {
     const planilhaAditivos = workbook.addWorksheet('Aditivos');
-    const colunas: string[] = [];
-    const vistas = new Set<string>();
-    for (const aditivo of contrato.aditivos) {
-      const raw = aditivo.dadosBrutos as Record<string, unknown>;
-      if (raw && typeof raw === 'object') {
-        for (const chave of Object.keys(raw)) {
-          if (!vistas.has(chave)) {
-            vistas.add(chave);
-            colunas.push(chave);
-          }
-        }
-      }
-    }
-
-    planilhaAditivos.columns = [
+    preencherPlanilhaDinamica(
+      planilhaAditivos,
       { header: 'Nº do aditivo', key: '__numero', width: 18 },
-      ...colunas.map((chave) => ({ header: chave, key: chave, width: 24 })),
-    ];
-    planilhaAditivos.getRow(1).font = { bold: true };
+      contrato.aditivos.map((aditivo) => ({ __fixo: rotuloAditivo(aditivo), raw: aditivo.dadosBrutos as Record<string, unknown> })),
+    );
+  }
 
-    for (const aditivo of contrato.aditivos) {
-      const raw = (aditivo.dadosBrutos as Record<string, unknown>) ?? {};
-      const linha: Record<string, unknown> = {
-        __numero: aditivo.sequencial != null ? `${aditivo.ordem} (seq. ${aditivo.sequencial})` : String(aditivo.ordem),
-      };
-      for (const chave of colunas) {
-        linha[chave] = valorCelula(raw[chave]);
-      }
-      planilhaAditivos.addRow(linha);
-    }
+  // Itens vinculados a aditivos — uma aba própria, com a primeira coluna
+  // dizendo de qual aditivo cada item veio (mesmo rótulo da aba Aditivos).
+  // Aditivos sem nenhum item simplesmente não aparecem aqui (normal numa
+  // planilha); a ausência é explícita no relatório em PDF da extensão.
+  const itensDeAditivos = contrato.aditivos.flatMap((aditivo) =>
+    aditivo.itens.map((item) => ({ __fixo: rotuloAditivo(aditivo), raw: item.dadosBrutos as Record<string, unknown> })),
+  );
+  if (itensDeAditivos.length > 0) {
+    const planilhaItensAditivos = workbook.addWorksheet('Itens dos Aditivos');
+    preencherPlanilhaDinamica(planilhaItensAditivos, { header: 'Nº do aditivo', key: '__numero', width: 18 }, itensDeAditivos);
   }
 
   const nomeArquivo = `contrato-${contrato.numeroFormatado ?? contrato.sequencial}.xlsx`;

@@ -30,12 +30,36 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'buscar-aditivos') {
-    buscarAditivos(message.id)
+    buscarSubrecurso(`${ENDPOINT_CONTRATACOES}/${limparId(message.id)}/aditivos`)
       .then((aditivos) => sendResponse({ aditivos }))
       .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
     return true
   }
+
+  if (message.type === 'buscar-itens') {
+    buscarSubrecurso(`${ENDPOINT_CONTRATACOES}/${limparId(message.id)}/itens`)
+      .then((itens) => sendResponse({ itens }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
+  // Best-effort: caminho conjecturado (mesmo padrão dos demais sub-recursos
+  // do Betha, `<endpoint>/<id>/<subrecurso>`), nunca confirmado ao vivo por
+  // não haver sessão disponível pra testar. Se o caminho estiver errado, o
+  // Betha deve responder 404 e isso vira simplesmente "sem itens
+  // vinculados" no relatório — não trava nada. Se aparecer errado/vazio
+  // onde deveria ter dados, é o primeiro lugar a corrigir.
+  if (message.type === 'buscar-itens-aditivo') {
+    buscarSubrecurso(`${ENDPOINT_CONTRATACOES}/${limparId(message.contratoId)}/aditivos/${limparId(message.aditivoId)}/itens`)
+      .then((itens) => sendResponse({ itens }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
 })
+
+function limparId(id) {
+  return String(id || '').replace(/[^\w-]/g, '')
+}
 
 async function resolverHeaders() {
   if (headersCapturados) return headersCapturados
@@ -93,15 +117,12 @@ async function buscarContrato(sequencial, numero, ano) {
   return { candidatos: await chamarBetha(filter) }
 }
 
-// Sub-recurso `contratacoes/{id}/aditivos` — confirmado como existente
-// (200) no Delta-Intelligence (CONTEXTO_PROJETO.md §5), mas sem catálogo de
-// campos confirmado ainda. Somente leitura, paginado como qualquer outro
-// endpoint do Betha; devolve os itens crus (sem supor nomes de campo que não
-// foram confirmados ao vivo).
-async function buscarAditivos(contratacaoId) {
-  const idLimpo = String(contratacaoId || '').replace(/[^\w-]/g, '')
-  if (!idLimpo) throw new Error('Contrato sem id para buscar aditivos.')
-
+// Sub-recurso genérico `<caminho>` (ex.: `contratacoes/{id}/aditivos`,
+// `contratacoes/{id}/itens`) — mesmo padrão paginado de qualquer endpoint do
+// Betha. Somente leitura; devolve os itens crus (sem supor nomes de campo
+// que não foram confirmados ao vivo). 404 vira lista vazia (sub-recurso sem
+// registros cadastrados), não erro — é um estado normal, não uma falha.
+async function buscarSubrecurso(caminho) {
   const headers = await resolverHeaders()
   if (!headers) {
     throw new Error('Sessão do Betha Contratos não capturada. Abra contratos.betha.cloud, faça login e tente de novo.')
@@ -115,7 +136,7 @@ async function buscarAditivos(contratacaoId) {
 
   while (hasNext && offset < MAX) {
     const params = new URLSearchParams({ offset: String(offset), limit: String(PAGINA) })
-    const url = `https://${BETHA_CONTRATOS.apiHost}${BETHA_CONTRATOS.basePath}/${ENDPOINT_CONTRATACOES}/${idLimpo}/aditivos?${params}`
+    const url = `https://${BETHA_CONTRATOS.apiHost}${BETHA_CONTRATOS.basePath}/${caminho}?${params}`
     const resp = await fetch(url, {
       method: 'GET',
       headers: {
@@ -125,8 +146,8 @@ async function buscarAditivos(contratacaoId) {
       },
     })
     if (!resp.ok) {
-      if (offset === 0 && resp.status === 404) return [] // contrato sem aditivos cadastrados
-      throw new Error(`API do Betha respondeu ${resp.status} ao buscar aditivos`)
+      if (offset === 0 && (resp.status === 404 || resp.status === 400)) return []
+      throw new Error(`API do Betha respondeu ${resp.status} ao buscar ${caminho}`)
     }
     const dados = await resp.json()
     const pagina = Array.isArray(dados) ? dados : (dados.content || [])

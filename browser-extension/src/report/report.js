@@ -1,6 +1,51 @@
-import { montarCamposRelatorio, montarSecoesAditivos } from '../shared/campos-relatorio.js'
+import { montarCamposRelatorio, montarSecoesAditivos, montarTabelaDinamica } from '../shared/campos-relatorio.js'
 
 const STORAGE_KEY = 'centralDados.relatorioAtual'
+
+function criarTabelaCampos(campos) {
+  const tabela = document.createElement('table')
+  for (const { label, valor } of campos) {
+    const tr = document.createElement('tr')
+    tr.innerHTML = `<td class="campo"></td><td class="valor"></td>`
+    tr.querySelector('.campo').textContent = label
+    tr.querySelector('.valor').textContent = valor || '—'
+    tabela.appendChild(tr)
+  }
+  return tabela
+}
+
+// Tabela de colunas dinâmicas (itens do contrato ou de um aditivo) — null se
+// não houver nenhuma linha (chamador decide o que mostrar nesse caso).
+function criarTabelaDinamica({ colunas, linhas }) {
+  if (!linhas.length) return null
+
+  const tabela = document.createElement('table')
+  tabela.className = 'tabela-itens'
+
+  const thead = document.createElement('thead')
+  const trCabecalho = document.createElement('tr')
+  for (const coluna of colunas) {
+    const th = document.createElement('th')
+    th.textContent = coluna
+    trCabecalho.appendChild(th)
+  }
+  thead.appendChild(trCabecalho)
+  tabela.appendChild(thead)
+
+  const tbody = document.createElement('tbody')
+  for (const linha of linhas) {
+    const tr = document.createElement('tr')
+    for (const valor of linha) {
+      const td = document.createElement('td')
+      td.textContent = valor || '—'
+      tr.appendChild(td)
+    }
+    tbody.appendChild(tr)
+  }
+  tabela.appendChild(tbody)
+
+  return tabela
+}
 
 async function carregar() {
   const stored = await chrome.storage.local.get(STORAGE_KEY)
@@ -12,13 +57,16 @@ async function carregar() {
     return
   }
 
-  const tabela = document.getElementById('tabela')
-  for (const { label, valor } of montarCamposRelatorio(contrato)) {
-    const tr = document.createElement('tr')
-    tr.innerHTML = `<td class="campo"></td><td class="valor"></td>`
-    tr.querySelector('.campo').textContent = label
-    tr.querySelector('.valor').textContent = valor || '—'
-    tabela.appendChild(tr)
+  document.getElementById('tabela').replaceWith(criarTabelaCampos(montarCamposRelatorio(contrato)))
+
+  // Itens do contrato — logo abaixo dos dados do contrato.
+  const containerItensContrato = document.getElementById('itensContrato')
+  const tabelaItensContrato = criarTabelaDinamica(montarTabelaDinamica(contrato.itens))
+  if (tabelaItensContrato) {
+    const titulo = document.createElement('h2')
+    titulo.textContent = `Itens do contrato (${contrato.itens.length})`
+    containerItensContrato.appendChild(titulo)
+    containerItensContrato.appendChild(tabelaItensContrato)
   }
 
   const secoesAditivos = montarSecoesAditivos(contrato.aditivos)
@@ -35,16 +83,21 @@ async function carregar() {
       const h3 = document.createElement('h3')
       h3.textContent = secao.titulo
       bloco.appendChild(h3)
+      bloco.appendChild(criarTabelaCampos(secao.campos))
 
-      const tabelaAditivo = document.createElement('table')
-      for (const { label, valor } of secao.campos) {
-        const tr = document.createElement('tr')
-        tr.innerHTML = `<td class="campo"></td><td class="valor"></td>`
-        tr.querySelector('.campo').textContent = label
-        tr.querySelector('.valor').textContent = valor || '—'
-        tabelaAditivo.appendChild(tr)
+      // Itens vinculados a ESTE aditivo, logo abaixo dos dados dele — ou a
+      // mensagem explícita de que não há nenhum (aditivo sem itens é um
+      // estado normal, não um erro).
+      const tabelaItensAditivo = criarTabelaDinamica(secao.tabelaItens)
+      if (tabelaItensAditivo) {
+        bloco.appendChild(tabelaItensAditivo)
+      } else {
+        const semItens = document.createElement('p')
+        semItens.className = 'sem-itens'
+        semItens.textContent = `Aditivo ${secao.numero} sem itens vinculados`
+        bloco.appendChild(semItens)
       }
-      bloco.appendChild(tabelaAditivo)
+
       container.appendChild(bloco)
     }
   }
