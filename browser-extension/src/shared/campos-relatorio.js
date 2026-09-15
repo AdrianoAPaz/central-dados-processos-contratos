@@ -55,6 +55,12 @@ function formatarChave(chave) {
 
 function valorTexto(v) {
   if (v == null) return ''
+  // Referência a uma contratação (ex.: campo "contratacao" do aditivo) —
+  // mostra só "numeroTermo/ano" (ex.: "86/2025") em vez do objeto inteiro,
+  // que traz dezenas de campos irrelevantes pro relatório.
+  if (typeof v === 'object' && v.numeroTermo != null) {
+    return v.ano != null ? `${v.numeroTermo}/${v.ano}` : String(v.numeroTermo)
+  }
   if (typeof v === 'object') return JSON.stringify(v)
   return String(v)
 }

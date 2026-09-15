@@ -148,6 +148,13 @@ function valorCelula(v: unknown): string | number {
   if (v == null) return '';
   if (typeof v === 'number' || typeof v === 'string') return v;
   if (typeof v === 'boolean') return String(v);
+  // Referência a uma contratação (ex.: campo "contratacao" do aditivo) —
+  // mostra só "numeroTermo/ano" (ex.: "86/2025") em vez do objeto inteiro,
+  // que traz dezenas de campos irrelevantes pro relatório.
+  if (typeof v === 'object' && v !== null && 'numeroTermo' in v) {
+    const obj = v as Record<string, unknown>;
+    return obj.ano != null ? `${obj.numeroTermo}/${obj.ano}` : String(obj.numeroTermo);
+  }
   return JSON.stringify(v);
 }
 
