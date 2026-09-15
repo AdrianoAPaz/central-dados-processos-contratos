@@ -33,46 +33,74 @@ export function montarCamposRelatorio(c) {
   ]
 }
 
-// Tabela genérica (colunas dinâmicas, união das chaves de todos os
-// registros) — usada pros itens do contrato e de cada aditivo. Catálogo de
-// campos não confirmado ao vivo, então mostramos o que vier, sem supor nomes.
-export function montarTabelaDinamica(registros) {
-  if (!Array.isArray(registros) || !registros.length) return { colunas: [], linhas: [] }
+// Colunas fixas do relatório de itens (pedido do usuário: só isso interessa,
+// não o restante do catálogo bruto do Betha). Cada campo tenta várias chaves
+// candidatas, em ordem, já que o nome exato usado pelo Betha pra "unidade de
+// medida"/"valor unitário" não foi confirmado ao vivo — se o nome real for
+// outro, cai em branco em vez de mostrar errado; ajustar a lista aqui assim
+// que confirmado.
+const CAMPOS_ITEM = [
+  { header: 'Nº do item', chaves: ['numero', 'numeroItem', 'item', 'ordem'] },
+  { header: 'Descrição', chaves: ['material', 'especificacao', 'descricaoItem', 'descricao'] },
+  { header: 'Unidade', chaves: ['unidadeMedida', 'unidade', 'unidade_medida', 'undMedida'] },
+  { header: 'Quantidade', chaves: ['quantidade', 'qtde', 'qtd'] },
+  { header: 'Valor unitário (R$)', chaves: ['valorUnitario', 'valorUnit', 'precoUnitario'], moeda: true },
+  { header: 'Valor total (R$)', chaves: ['valorTotal', 'valor'], moeda: true },
+]
 
-  const chaves = []
-  const vistas = new Set()
-  for (const raw of registros) {
-    if (raw && typeof raw === 'object') {
-      for (const chave of Object.keys(raw)) {
-        if (!vistas.has(chave)) {
-          vistas.add(chave)
-          chaves.push(chave)
-        }
-      }
-    }
+function extrairCampoItem(raw, chaves) {
+  if (!raw || typeof raw !== 'object') return undefined
+  for (const chave of chaves) {
+    if (raw[chave] !== undefined) return raw[chave]
   }
+  return undefined
+}
 
+// Tabela de itens (do contrato ou de um aditivo) com as colunas FIXAS acima
+// — usada pros itens do contrato e de cada aditivo.
+export function montarTabelaItens(registros) {
+  if (!Array.isArray(registros) || !registros.length) return { colunas: [], linhas: [] }
   return {
-    colunas: chaves.map(formatarChave),
-    linhas: registros.map((raw) => chaves.map((chave) => valorTexto(raw ? raw[chave] : undefined))),
+    colunas: CAMPOS_ITEM.map((c) => c.header),
+    linhas: registros.map((raw) =>
+      CAMPOS_ITEM.map((c) => {
+        const bruto = extrairCampoItem(raw, c.chaves)
+        return c.moeda ? formatarValor(bruto) : valorTexto(bruto)
+      }),
+    ),
   }
 }
 
-// Cada aditivo vira uma SEÇÃO própria, identificada pelo nº de ordem (posição
-// no array — sempre confiável) + o sequencial/id do próprio aditivo, quando
-// existir. Os itens vinculados ao aditivo (se houver) viram uma tabela
-// própria logo abaixo dos campos dele — nunca misturados com os do contrato
-// ou de outro aditivo.
+// Melhor palpite de um identificador próprio do aditivo — mesma lógica do
+// backend (extrairIdentificadorAditivo em contratos.ts), pra ordenar os
+// aditivos cronologicamente pelo sequencial antes de numerá-los.
+function extrairIdentificadorAditivo(raw) {
+  const v = raw && (raw.sequencial ?? raw.id)
+  const n = Number(v)
+  return v != null && !Number.isNaN(n) ? n : null
+}
+
+// Cada aditivo vira uma SEÇÃO própria, numerada na ordem CRONOLÓGICA do
+// sequencial (não a ordem em que a API devolveu) — identificada também pelo
+// sequencial/id do próprio aditivo, quando existir. Os itens vinculados ao
+// aditivo (se houver) viram uma tabela própria logo abaixo dos campos dele —
+// nunca misturados com os do contrato ou de outro aditivo.
 export function montarSecoesAditivos(aditivos) {
   if (!Array.isArray(aditivos) || !aditivos.length) return []
-  return aditivos.map((raw, index) => {
-    const identificador = raw && (raw.sequencial ?? raw.id) != null ? (raw.sequencial ?? raw.id) : null
+
+  const ordenados = aditivos
+    .map((raw, indiceOriginal) => ({ raw, indiceOriginal, chave: extrairIdentificadorAditivo(raw) ?? Infinity }))
+    .sort((a, b) => a.chave - b.chave || a.indiceOriginal - b.indiceOriginal)
+    .map((x) => x.raw)
+
+  return ordenados.map((raw, index) => {
+    const identificador = extrairIdentificadorAditivo(raw)
     const numero = index + 1
     const titulo = identificador != null ? `Aditivo ${numero} (seq. ${identificador})` : `Aditivo ${numero}`
 
     const { itens, ...demaisCampos } = raw || {}
     const campos = Object.entries(demaisCampos).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorTexto(valor) }))
-    const tabelaItens = montarTabelaDinamica(itens)
+    const tabelaItens = montarTabelaItens(itens)
 
     return { numero, titulo, campos, tabelaItens }
   })

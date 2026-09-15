@@ -99,7 +99,15 @@ contratosRouter.post('/', async (req, res) => {
   await prisma.aditivo.deleteMany({ where: { contratoId: contrato.id } });
   await prisma.item.deleteMany({ where: { contratoId: contrato.id, aditivoId: null } });
 
-  const aditivosRecebidos = Array.isArray(body.aditivos) ? (body.aditivos as Record<string, unknown>[]) : [];
+  // Ordem de exibição é cronológica pelo sequencial do próprio aditivo (não a
+  // ordem em que a API devolveu) — `ordem` já nasce refletindo isso, então
+  // toda consulta que ordena por `ordem` (buscarContrato abaixo) já sai
+  // correta sem precisar reordenar de novo em cada lugar.
+  const aditivosRecebidos = (Array.isArray(body.aditivos) ? (body.aditivos as Record<string, unknown>[]) : [])
+    .map((raw, indiceOriginal) => ({ raw, indiceOriginal, chave: extrairIdentificadorAditivo(raw) ?? Infinity }))
+    .sort((a, b) => a.chave - b.chave || a.indiceOriginal - b.indiceOriginal)
+    .map((x) => x.raw);
+
   for (let i = 0; i < aditivosRecebidos.length; i++) {
     const raw = aditivosRecebidos[i];
     const { itens: itensDoAditivoRaw, ...dadosAditivo } = raw;
@@ -233,9 +241,58 @@ function rotuloAditivo(aditivo: { ordem: number; sequencial: number | null }): s
   return aditivo.sequencial != null ? `${aditivo.ordem} (seq. ${aditivo.sequencial})` : String(aditivo.ordem);
 }
 
+// Colunas fixas do relatório de itens (pedido do usuário: só isso interessa,
+// não o restante do catálogo bruto do Betha). Cada campo tenta várias chaves
+// candidatas, em ordem, já que o nome exato usado pelo Betha pra "unidade de
+// medida"/"valor unitário" não foi confirmado ao vivo — se o nome real for
+// outro, cai em branco em vez de mostrar errado; ajustar a lista aqui assim
+// que confirmado.
+const CAMPOS_ITEM: Array<{ header: string; key: string; chaves: string[]; moeda?: boolean }> = [
+  { header: 'Nº do item', key: 'numero', chaves: ['numero', 'numeroItem', 'item', 'ordem'] },
+  { header: 'Descrição', key: 'descricao', chaves: ['material', 'especificacao', 'descricaoItem', 'descricao'] },
+  { header: 'Unidade', key: 'unidade', chaves: ['unidadeMedida', 'unidade', 'unidade_medida', 'undMedida'] },
+  { header: 'Quantidade', key: 'quantidade', chaves: ['quantidade', 'qtde', 'qtd'] },
+  { header: 'Valor unitário (R$)', key: 'valorUnitario', chaves: ['valorUnitario', 'valorUnit', 'precoUnitario'], moeda: true },
+  { header: 'Valor total (R$)', key: 'valorTotal', chaves: ['valorTotal', 'valor'], moeda: true },
+];
+
+function extrairCampoItem(raw: Record<string, unknown>, chaves: string[]): unknown {
+  for (const chave of chaves) {
+    if (raw[chave] !== undefined) return raw[chave];
+  }
+  return undefined;
+}
+
+// Mesma ideia de preencherPlanilhaDinamica, mas com as colunas FIXAS de
+// CAMPOS_ITEM em vez da união de todas as chaves — usado pras duas abas de
+// itens (do contrato e de aditivos). `colunaFixa` é opcional — só faz
+// sentido pra identificar de qual aditivo cada item veio (Itens dos
+// Aditivos); Itens do Contrato não precisa, já que "Nº do item" já vem do
+// próprio CAMPOS_ITEM (colunaFixa duplicaria essa coluna).
+function preencherPlanilhaItens(
+  planilha: ExcelJS.Worksheet,
+  colunaFixa: { header: string; key: string; width: number } | null,
+  linhas: Array<{ __fixo: string; raw: Record<string, unknown> }>,
+) {
+  planilha.columns = [
+    ...(colunaFixa ? [colunaFixa] : []),
+    ...CAMPOS_ITEM.map((c) => ({ header: c.header, key: c.key, width: 22 })),
+  ];
+  planilha.getRow(1).font = { bold: true };
+
+  for (const linha of linhas) {
+    const registro: Record<string, unknown> = colunaFixa ? { [colunaFixa.key]: linha.__fixo } : {};
+    for (const campo of CAMPOS_ITEM) {
+      const bruto = extrairCampoItem(linha.raw, campo.chaves);
+      registro[campo.key] = campo.moeda && bruto != null ? Number(bruto) : valorCelula(bruto);
+    }
+    planilha.addRow(registro);
+  }
+}
+
 // Gera colunas dinâmicas (união das chaves de todos os registros) + preenche
-// uma planilha — usado tanto pra Itens do Contrato quanto pra Itens dos
-// Aditivos, sempre com uma primeira coluna fixa de identificação.
+// uma planilha — usado pra Aditivos (catálogo de campos não confirmado ao
+// vivo, mostramos tudo que vier).
 function preencherPlanilhaDinamica(
   planilha: ExcelJS.Worksheet,
   colunaFixa: { header: string; key: string; width: number },
@@ -290,9 +347,9 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
   // na mesma planilha de forma legível).
   if (contrato.itens.length > 0) {
     const planilhaItens = workbook.addWorksheet('Itens do Contrato');
-    preencherPlanilhaDinamica(
+    preencherPlanilhaItens(
       planilhaItens,
-      { header: 'Nº do item', key: '__numero', width: 14 },
+      null,
       contrato.itens.map((item) => ({ __fixo: String(item.ordem), raw: item.dadosBrutos as Record<string, unknown> })),
     );
   }
@@ -321,7 +378,7 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
   );
   if (itensDeAditivos.length > 0) {
     const planilhaItensAditivos = workbook.addWorksheet('Itens dos Aditivos');
-    preencherPlanilhaDinamica(planilhaItensAditivos, { header: 'Nº do aditivo', key: '__numero', width: 18 }, itensDeAditivos);
+    preencherPlanilhaItens(planilhaItensAditivos, { header: 'Nº do aditivo', key: '__numero', width: 18 }, itensDeAditivos);
   }
 
   const nomeArquivo = `contrato-${contrato.numeroFormatado ?? contrato.sequencial}.xlsx`;

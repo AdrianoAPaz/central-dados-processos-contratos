@@ -1,4 +1,4 @@
-import { montarCamposRelatorio, montarSecoesAditivos, montarTabelaDinamica } from '../shared/campos-relatorio.js'
+import { montarCamposRelatorio, montarSecoesAditivos, montarTabelaItens } from '../shared/campos-relatorio.js'
 
 const STORAGE_KEY = 'centralDados.relatorioAtual'
 
@@ -61,7 +61,7 @@ async function carregar() {
 
   // Itens do contrato — logo abaixo dos dados do contrato.
   const containerItensContrato = document.getElementById('itensContrato')
-  const tabelaItensContrato = criarTabelaDinamica(montarTabelaDinamica(contrato.itens))
+  const tabelaItensContrato = criarTabelaDinamica(montarTabelaItens(contrato.itens))
   if (tabelaItensContrato) {
     const titulo = document.createElement('h2')
     titulo.textContent = `Itens do contrato (${contrato.itens.length})`
