@@ -1,13 +1,11 @@
 import { Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { ContratosPage } from './features/contratos/ContratosPage';
 
 function Home() {
   return (
     <Layout>
-      <div className="page-header">
-        <h1>Central de Dados de Processos e Contratos</h1>
-        <p>Comece adicionando suas próprias telas em `src/features/`.</p>
-      </div>
+      <ContratosPage />
     </Layout>
   );
 }

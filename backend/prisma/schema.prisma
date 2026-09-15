@@ -7,13 +7,51 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Placeholder — o Prisma não gera client com o schema sem nenhum model
-// definido (quebra o build). Apague este model assim que criar os models
-// reais do projeto (ex.: Processo, Contrato, OrdemCompra, InteracaoContabil)
-// e rode `npm run db:migrate` pra gerar a primeira migration de verdade.
-model Placeholder {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now()) @map("created_at")
+// Um registro do endpoint `contratacoes` do Betha Contratos (Contrato, Compra
+// Direta ou Ata de Registro de Preços — diferenciados por `tipoInstrumento`).
+// Campos achatados abaixo cobrem o que o relatório em Excel usa; `dadosBrutos`
+// guarda o JSON completo importado, pra nunca perder informação que ainda não
+// virou coluna própria.
+model Contrato {
+  id     String @id @default(cuid())
+  // Identificador único e universal na API do Betha (tooltip "Sequência da
+  // contratação" na UI) — nunca se repete, mesmo entre tipos diferentes.
+  sequencial Int @unique
 
-  @@map("placeholder")
+  numeroTermo         Int?
+  ano                 Int?
+  // "117/2026" — numeroTermo + ano já formatados, pra exibir/exportar direto.
+  numeroFormatado     String? @map("numero_formatado")
+  objeto              String?
+  situacao            String?
+  situacaoDesc        String? @map("situacao_desc")
+  // classificacao (ex.: CONTRATO_TERMO_INICIAL) e descrição legível.
+  tipoInstrumento     String? @map("tipo_instrumento")
+  tipoInstrumentoDesc String? @map("tipo_instrumento_desc")
+
+  dataAssinatura     DateTime? @map("data_assinatura")
+  dataInicioVigencia DateTime? @map("data_inicio_vigencia")
+  dataFimVigencia    DateTime? @map("data_fim_vigencia")
+
+  valorOriginal  Decimal? @map("valor_original") @db.Decimal(14, 2)
+  valorAditivos  Decimal? @map("valor_aditivos") @db.Decimal(14, 2)
+  valorSolFornec Decimal? @map("valor_sol_fornec") @db.Decimal(14, 2)
+
+  fornecedorNome    String? @map("fornecedor_nome")
+  fornecedorCpfCnpj String? @map("fornecedor_cpf_cnpj")
+
+  entidadeNome String? @map("entidade_nome")
+  entidadeCnpj String? @map("entidade_cnpj")
+
+  processoNumero Int? @map("processo_numero")
+  processoAno    Int? @map("processo_ano")
+
+  // Payload cru importado (copiado da API do Betha) — fonte de verdade
+  // completa, além das colunas achatadas acima.
+  dadosBrutos Json @map("dados_brutos")
+
+  criadoEm     DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+
+  @@map("contrato")
 }

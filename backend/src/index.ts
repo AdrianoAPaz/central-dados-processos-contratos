@@ -2,12 +2,15 @@ import 'express-async-errors';
 import path from 'node:path';
 import express from 'express';
 import { env } from './env';
+import { contratosRouter } from './routes/contratos';
 
 const app = express();
 
 app.use(express.json());
 
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
+
+app.use('/api/contratos', contratosRouter);
 
 // Em produção, o backend também serve o build do frontend (CLAUDE.md 1.2) —
 // um processo só, uma porta só, exatamente como o deploy-guide.md espera.
