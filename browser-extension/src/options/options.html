@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>Opções - Central de Dados</title>
+<style>
+  body { font-family: system-ui, sans-serif; padding: 16px; width: 380px; }
+  label { display: block; font-size: 13px; margin-bottom: 4px; }
+  input { width: 100%; box-sizing: border-box; padding: 6px; font-size: 13px; }
+  button { margin-top: 10px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
+  .msg { font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h2>Central de Dados de Processos e Contratos</h2>
+  <label>URL do backend (ex.: http://localhost:8090)</label>
+  <input id="backendUrl" type="text" placeholder="http://localhost:8090" />
+  <button id="salvar">Salvar</button>
+  <div id="msg" class="msg"></div>
+  <script src="options.js"></script>
+</body>
+</html>

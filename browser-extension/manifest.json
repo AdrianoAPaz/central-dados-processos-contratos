@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Central de Dados — Coletor de Contratos",
+  "version": "0.1.0",
+  "description": "Lê contratos do Betha Contratos (somente leitura) e envia para a Central de Dados de Processos e Contratos.",
+  "permissions": ["storage"],
+  "host_permissions": ["*://contratos.betha.cloud/*", "*://api.contratos.betha.cloud/*"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "Central de Dados — Contratos"
+  },
+  "options_ui": {
+    "page": "src/options/options.html",
+    "open_in_tab": false
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://contratos.betha.cloud/*"],
+      "js": ["src/page/interceptor.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["*://contratos.betha.cloud/*"],
+      "js": ["src/content/bridge.js", "src/content/menu-injector.js", "src/content/panel-injector.js"],
+      "css": ["src/content/styles.css"],
+      "run_at": "document_idle",
+      "world": "ISOLATED"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/popup/popup.html", "src/popup/popup.js"],
+      "matches": ["*://contratos.betha.cloud/*"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

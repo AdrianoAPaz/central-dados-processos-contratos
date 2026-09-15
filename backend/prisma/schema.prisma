@@ -50,8 +50,35 @@ model Contrato {
   // completa, além das colunas achatadas acima.
   dadosBrutos Json @map("dados_brutos")
 
+  aditivos Aditivo[]
+
   criadoEm     DateTime @default(now()) @map("criado_em")
   atualizadoEm DateTime @updatedAt @map("atualizado_em")
 
   @@map("contrato")
+}
+
+// Um item do sub-recurso `contratacoes/{id}/aditivos` do Betha Contratos.
+// O catálogo de campos desse sub-recurso ainda não foi confirmado ao vivo
+// (ver Delta-Intelligence CONTEXTO_PROJETO.md §5 — existe, mas sem schema
+// documentado), então NÃO achatamos campos aqui: guardamos o JSON cru
+// completo e deixamos o relatório extrair o que existir dinamicamente.
+// `ordem` é a posição no array recebido (1, 2, 3…) — sempre confiável,
+// mesmo que o próprio aditivo não tenha um campo de sequencial próprio.
+model Aditivo {
+  id         String   @id @default(cuid())
+  contratoId String   @map("contrato_id")
+  contrato   Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+
+  ordem      Int
+  // Melhor palpite de identificador próprio do aditivo (raw.sequencial ou
+  // raw.id, se existir) — só para exibição; `ordem` é quem garante que cada
+  // aditivo aparece separado no relatório, sem depender disso existir.
+  sequencial Int?
+
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  @@unique([contratoId, ordem])
+  @@map("aditivo")
 }

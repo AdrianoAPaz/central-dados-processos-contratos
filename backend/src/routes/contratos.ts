@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import ExcelJS from 'exceljs';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
 
 export const contratosRouter = Router();
@@ -44,8 +45,17 @@ function mapearContrato(raw: Record<string, unknown>) {
     entidadeCnpj: (entidade?.cnpj as string) ?? null,
     processoNumero: processo?.numero != null ? Number(processo.numero) : null,
     processoAno: processo?.ano != null ? Number(processo.ano) : null,
-    dadosBrutos: raw,
+    dadosBrutos: raw as Prisma.InputJsonObject,
   };
+}
+
+// Melhor palpite de um identificador próprio do aditivo (só para exibição —
+// o catálogo de campos desse sub-recurso não foi confirmado ao vivo ainda).
+// `ordem` (posição no array recebido) é quem garante a separação de verdade.
+function extrairIdentificadorAditivo(raw: Record<string, unknown>): number | null {
+  if (raw.sequencial != null && !Number.isNaN(Number(raw.sequencial))) return Number(raw.sequencial);
+  if (raw.id != null && !Number.isNaN(Number(raw.id))) return Number(raw.id);
+  return null;
 }
 
 contratosRouter.get('/', async (_req, res) => {
@@ -59,15 +69,17 @@ contratosRouter.get('/', async (_req, res) => {
       fornecedorNome: true,
       situacaoDesc: true,
       criadoEm: true,
+      _count: { select: { aditivos: true } },
     },
   });
   res.json(contratos);
 });
 
 contratosRouter.post('/', async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
   let dados;
   try {
-    dados = mapearContrato(req.body ?? {});
+    dados = mapearContrato(body);
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : 'JSON inválido' });
     return;
@@ -78,11 +90,29 @@ contratosRouter.post('/', async (req, res) => {
     create: dados,
     update: dados,
   });
+
+  // Aditivos vêm num campo à parte no corpo (contrato.aditivos = [...],
+  // buscado pela extensão em contratacoes/{id}/aditivos) — nunca dentro de
+  // `dadosBrutos` do contrato em si. Reimportar sempre substitui os
+  // anteriores (evita duplicar/deixar aditivo removido no Betha órfão aqui).
+  const aditivosRecebidos = Array.isArray(body.aditivos) ? (body.aditivos as Record<string, unknown>[]) : [];
+  await prisma.aditivo.deleteMany({ where: { contratoId: contrato.id } });
+  if (aditivosRecebidos.length) {
+    await prisma.aditivo.createMany({
+      data: aditivosRecebidos.map((raw, index) => ({
+        contratoId: contrato.id,
+        ordem: index + 1,
+        sequencial: extrairIdentificadorAditivo(raw),
+        dadosBrutos: raw as Prisma.InputJsonObject,
+      })),
+    });
+  }
+
   res.status(201).json(contrato);
 });
 
 contratosRouter.get('/:id', async (req, res) => {
-  const contrato = await prisma.contrato.findUnique({ where: { id: req.params.id } });
+  const contrato = await buscarContrato(req.params.id);
   if (!contrato) {
     res.status(404).json({ error: 'Contrato não encontrado' });
     return;
@@ -107,14 +137,25 @@ const CAMPOS_RELATORIO: Array<{ label: string; valor: (c: NonNullable<Awaited<Re
   { label: 'Valor original (R$)', valor: (c) => (c.valorOriginal != null ? Number(c.valorOriginal) : null) },
   { label: 'Valor de aditivos (R$)', valor: (c) => (c.valorAditivos != null ? Number(c.valorAditivos) : null) },
   { label: 'Valor de solicitações de fornecimento (R$)', valor: (c) => (c.valorSolFornec != null ? Number(c.valorSolFornec) : null) },
+  { label: 'Quantidade de aditivos', valor: (c) => c.aditivos.length },
 ];
 
 function formatarData(data: Date | null): string | null {
   return data ? data.toISOString().slice(0, 10) : null;
 }
 
+function valorCelula(v: unknown): string | number {
+  if (v == null) return '';
+  if (typeof v === 'number' || typeof v === 'string') return v;
+  if (typeof v === 'boolean') return String(v);
+  return JSON.stringify(v);
+}
+
 function buscarContrato(id: string) {
-  return prisma.contrato.findUnique({ where: { id } });
+  return prisma.contrato.findUnique({
+    where: { id },
+    include: { aditivos: { orderBy: { ordem: 'asc' } } },
+  });
 }
 
 contratosRouter.get('/:id/relatorio', async (req, res) => {
@@ -134,6 +175,46 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
 
   for (const campo of CAMPOS_RELATORIO) {
     planilha.addRow({ campo: campo.label, valor: campo.valor(contrato) ?? '' });
+  }
+
+  // Cada aditivo vira uma LINHA própria numa aba separada — sempre
+  // identificado pelo nº de ordem (+ o sequencial do próprio aditivo, quando
+  // existir), pra nunca misturar os dados de aditivos diferentes na mesma
+  // célula. Colunas são geradas dinamicamente a partir do que cada aditivo
+  // realmente trouxe (o catálogo de campos desse sub-recurso do Betha ainda
+  // não foi confirmado ao vivo — ver mapearContrato acima).
+  if (contrato.aditivos.length > 0) {
+    const planilhaAditivos = workbook.addWorksheet('Aditivos');
+    const colunas: string[] = [];
+    const vistas = new Set<string>();
+    for (const aditivo of contrato.aditivos) {
+      const raw = aditivo.dadosBrutos as Record<string, unknown>;
+      if (raw && typeof raw === 'object') {
+        for (const chave of Object.keys(raw)) {
+          if (!vistas.has(chave)) {
+            vistas.add(chave);
+            colunas.push(chave);
+          }
+        }
+      }
+    }
+
+    planilhaAditivos.columns = [
+      { header: 'Nº do aditivo', key: '__numero', width: 18 },
+      ...colunas.map((chave) => ({ header: chave, key: chave, width: 24 })),
+    ];
+    planilhaAditivos.getRow(1).font = { bold: true };
+
+    for (const aditivo of contrato.aditivos) {
+      const raw = (aditivo.dadosBrutos as Record<string, unknown>) ?? {};
+      const linha: Record<string, unknown> = {
+        __numero: aditivo.sequencial != null ? `${aditivo.ordem} (seq. ${aditivo.sequencial})` : String(aditivo.ordem),
+      };
+      for (const chave of colunas) {
+        linha[chave] = valorCelula(raw[chave]);
+      }
+      planilhaAditivos.addRow(linha);
+    }
   }
 
   const nomeArquivo = `contrato-${contrato.numeroFormatado ?? contrato.sequencial}.xlsx`;

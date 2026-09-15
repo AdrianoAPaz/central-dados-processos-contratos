@@ -1,0 +1,64 @@
+.central-dados-menu-item {
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0.85;
+  transition: opacity 0.15s ease;
+}
+
+.central-dados-menu-item:hover {
+  opacity: 1;
+}
+
+.central-dados-menu-item svg {
+  display: block;
+}
+
+.central-dados-panel-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 2147483000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 24px;
+}
+
+.central-dados-panel-caixa {
+  position: relative;
+  background: #f8fafc;
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.22);
+  overflow: hidden;
+  width: 400px;
+  max-width: 95vw;
+  max-height: 90vh;
+}
+
+.central-dados-panel-fechar {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.06);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  color: #475569;
+  transition: background-color 0.15s ease;
+}
+
+.central-dados-panel-fechar:hover {
+  background: rgba(15, 23, 42, 0.12);
+}
+
+.central-dados-panel-iframe {
+  display: block;
+  width: 100%;
+  height: 90vh;
+  border: none;
+}
