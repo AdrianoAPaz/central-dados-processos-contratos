@@ -7,6 +7,13 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Sem models ainda — este projeto não usa login (CLAUDE.md 1.5), então não
-// há um model User de exemplo. Adicione seus models aqui e rode
-// `npm run db:migrate` pra gerar a primeira migration.
+// Placeholder — o Prisma não gera client com o schema sem nenhum model
+// definido (quebra o build). Apague este model assim que criar os models
+// reais do projeto (ex.: Processo, Contrato, OrdemCompra, InteracaoContabil)
+// e rode `npm run db:migrate` pra gerar a primeira migration de verdade.
+model Placeholder {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("placeholder")
+}
