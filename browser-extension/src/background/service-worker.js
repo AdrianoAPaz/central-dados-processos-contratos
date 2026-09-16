@@ -55,6 +55,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
     return true
   }
+
+  // Baixa um anexo do Betha com o header de sessão e devolve os bytes em
+  // base64 — não usa `chrome.downloads` (exigiria permissão nova no manifest,
+  // que derruba a extensão até reaprovação da Chrome Web Store). Quem chamou
+  // (report.js, que roda numa página com DOM completo) monta o Blob e
+  // dispara o download local a partir dos bytes já recebidos.
+  if (message.type === 'baixar-anexo') {
+    baixarAnexo(message.arquivoId)
+      .then(sendResponse)
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
 })
 
 function limparId(id) {
@@ -175,4 +187,77 @@ async function enviarParaCentral(contrato) {
     throw new Error(`Central de Dados respondeu ${resp.status}: ${texto}`)
   }
   return resp.json()
+}
+
+// Teto de tamanho por download — acima disso o pico de memória (ArrayBuffer +
+// string binária + base64, ~5-6x o tamanho do arquivo) e o limite prático de
+// serialização de mensagens da extensão (~64MB) fariam o download falhar de
+// um jeito confuso em vez de dar um aviso claro. Mesmo limite usado e testado
+// no projeto irmão Delta Intelligence.
+const TAMANHO_MAX_DOWNLOAD_BYTES = 30 * 1024 * 1024 // 30MB
+const TIMEOUT_DOWNLOAD_MS = 60000
+
+// Codifica em base64 sem `Buffer` (indisponível no service worker), em blocos
+// de 32KB pra não estourar a pilha em arquivos grandes.
+function arrayBufferToBase64(buffer) {
+  let binary = ''
+  const bytes = new Uint8Array(buffer)
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(binary)
+}
+
+// Download de um anexo do contrato. URL confirmada ao vivo no projeto irmão
+// Delta Intelligence (2026-07-16, mesma API do Betha Contratos):
+// `<basePath>/arquivos/{id}/conteudo`, GET com o mesmo header de sessão dos
+// demais endpoints — o objeto do anexo em si nunca traz uma URL pronta (só
+// id/nome/tipo/tamanho), por isso um `<a href>` direto sempre falharia sem
+// esses headers de autenticação.
+async function baixarAnexo(arquivoId) {
+  if (!arquivoId) return { erro: 'Anexo sem id para download.' }
+  // Ids reais são UUID (ex.: "42b0df52-..."); qualquer coisa fora desse
+  // formato é rejeitada antes de entrar na URL — defesa em profundidade
+  // contra manipulação do caminho de uma requisição autenticada.
+  if (!/^[A-Za-z0-9-]+$/.test(String(arquivoId))) {
+    return { erro: 'Id de anexo inválido.' }
+  }
+
+  const headers = await resolverHeaders()
+  if (!headers) {
+    return { erro: 'Sessão do Betha Contratos não capturada. Abra contratos.betha.cloud, faça login e tente de novo.' }
+  }
+
+  const url = `https://${BETHA_CONTRATOS.apiHost}${BETHA_CONTRATOS.basePath}/arquivos/${arquivoId}/conteudo`
+  let response
+  try {
+    response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: montarAuthorization(headers.authorization),
+        'App-Context': headers.appContext,
+        'User-Access': headers.userAccess,
+      },
+      signal: AbortSignal.timeout(TIMEOUT_DOWNLOAD_MS),
+    })
+  } catch (e) {
+    const timeout = e && e.name === 'TimeoutError'
+    return { erro: timeout ? 'Tempo esgotado ao baixar o anexo. Tente novamente.' : `Falha de rede ao baixar: ${String((e && e.message) || e)}` }
+  }
+  if (!response.ok) {
+    return { erro: `Falha ao baixar (${response.status})` }
+  }
+
+  const tamanhoAnunciado = Number(response.headers.get('Content-Length'))
+  if (tamanhoAnunciado > TAMANHO_MAX_DOWNLOAD_BYTES) {
+    return { erro: `Anexo muito grande para baixar pela extensão (${(tamanhoAnunciado / 1024 / 1024).toFixed(1)}MB). Baixe direto pelo Betha.` }
+  }
+  const buffer = await response.arrayBuffer()
+  if (buffer.byteLength > TAMANHO_MAX_DOWNLOAD_BYTES) {
+    return { erro: `Anexo muito grande para baixar pela extensão (${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB). Baixe direto pelo Betha.` }
+  }
+
+  const mimeType = response.headers.get('Content-Type') || 'application/octet-stream'
+  return { success: true, base64: arrayBufferToBase64(buffer), mimeType }
 }

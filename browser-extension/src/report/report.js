@@ -47,6 +47,68 @@ function criarTabelaDinamica({ colunas, linhas }) {
   return tabela
 }
 
+// Anexos do contrato — `arquivos` é um array inline do próprio registro
+// (contrato e cada aditivo podem trazer o seu), nunca um sub-recurso à
+// parte; por isso já vêm dentro de `contrato` sem precisar de outra busca.
+// Confirmado no projeto irmão Delta Intelligence (CONTEXTO_PROJETO.md §5).
+function coletarAnexos(contrato) {
+  const doContrato = (Array.isArray(contrato.arquivos) ? contrato.arquivos : []).map((a) => ({ ...a, origem: 'Contrato' }))
+  const doAditivos = (Array.isArray(contrato.aditivos) ? contrato.aditivos : []).flatMap((aditivo, i) =>
+    (Array.isArray(aditivo.arquivos) ? aditivo.arquivos : []).map((a) => ({ ...a, origem: `Aditivo ${i + 1}` })),
+  )
+  return [...doContrato, ...doAditivos].filter((a) => a && a.id)
+}
+
+function nomeAnexo(a) {
+  return a.nome || a.nomeArquivo || a.descricao || a.titulo || 'Anexo'
+}
+
+// Baixa cada anexo (um de cada vez — em paralelo o Chrome bloqueia downloads
+// automáticos em sequência rápida) via service worker, que tem a sessão do
+// Betha, e dispara o download local a partir dos bytes recebidos em base64 —
+// mesmo mecanismo do Delta Intelligence, sem precisar da permissão
+// `downloads` no manifest.
+async function baixarAnexosAutomaticamente(anexos, container) {
+  if (!anexos.length) return
+
+  const titulo = document.createElement('h2')
+  titulo.textContent = `Anexos (${anexos.length})`
+  container.appendChild(titulo)
+
+  const lista = document.createElement('ul')
+  lista.className = 'lista-anexos'
+  container.appendChild(lista)
+
+  for (const anexo of anexos) {
+    const li = document.createElement('li')
+    li.textContent = `⏳ ${anexo.origem} — ${nomeAnexo(anexo)}`
+    lista.appendChild(li)
+
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: 'baixar-anexo', arquivoId: anexo.id })
+      if (!resp || resp.erro || resp.success !== true || typeof resp.base64 !== 'string') {
+        li.textContent = `⚠️ ${anexo.origem} — ${nomeAnexo(anexo)} (falha: ${(resp && resp.erro) || 'sem retorno'})`
+        continue
+      }
+      const bin = atob(resp.base64)
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      const blob = new Blob([bytes], { type: resp.mimeType || 'application/octet-stream' })
+      const objectUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = nomeAnexo(anexo)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10000)
+      li.textContent = `✅ ${anexo.origem} — ${nomeAnexo(anexo)}`
+    } catch (e) {
+      li.textContent = `⚠️ ${anexo.origem} — ${nomeAnexo(anexo)} (erro: ${String((e && e.message) || e)})`
+    }
+  }
+}
+
 async function carregar() {
   const stored = await chrome.storage.local.get(STORAGE_KEY)
   const contrato = stored[STORAGE_KEY]
@@ -101,6 +163,11 @@ async function carregar() {
       container.appendChild(bloco)
     }
   }
+
+  // Baixa os anexos automaticamente ao abrir o relatório — pedido do
+  // usuário: gerar o PDF já deve trazer os documentos do contrato junto,
+  // sem precisar de um clique extra.
+  await baixarAnexosAutomaticamente(coletarAnexos(contrato), document.getElementById('anexos'))
 
   // Consumido uma vez — evita reabrir a mesma aba (ex.: F5) mostrando dados de
   // um relatório antigo por engano.

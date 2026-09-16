@@ -36,5 +36,26 @@ export default tseslint.config(
       globals: { process: 'readonly', console: 'readonly' },
     },
   },
+  {
+    // Globals de extensão Chrome — nunca configurados desde que a pasta foi
+    // adicionada (commit "Adiciona extensao Chrome de coleta"), por isso todo
+    // arquivo aqui falhava no-undef pra document/chrome/fetch/etc.
+    files: ['browser-extension/**/*.js'],
+    languageOptions: {
+      globals: {
+        chrome: 'readonly',
+        document: 'readonly',
+        window: 'readonly',
+        fetch: 'readonly',
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
+        Blob: 'readonly',
+        atob: 'readonly',
+        btoa: 'readonly',
+        setTimeout: 'readonly',
+        AbortSignal: 'readonly',
+      },
+    },
+  },
   prettier,
 );
