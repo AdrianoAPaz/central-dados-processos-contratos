@@ -56,6 +56,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  // Solicitações de fornecimento vinculadas ao contrato. Sub-recurso especial:
+  // GET na coleção dá 405 no Betha — só é listável via este POST lookup (ver
+  // buscarSolicitacoesFornecimento abaixo).
+  if (message.type === 'buscar-solicitacoes-fornecimento') {
+    buscarSolicitacoesFornecimento(message.id)
+      .then((solicitacoes) => sendResponse({ solicitacoes }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
   // Baixa um anexo do Betha com o header de sessão e devolve os bytes em
   // base64 — não usa `chrome.downloads` (exigiria permissão nova no manifest,
   // que derruba a extensão até reaprovação da Chrome Web Store). Quem chamou
@@ -170,6 +180,67 @@ async function buscarSubrecurso(caminho) {
   }
 
   return todos
+}
+
+// Lookup POST — único sub-recurso do Betha Contratos que exige POST pra
+// listar (GET na coleção de solicitacoesfornecimento responde 405; confirmado
+// no projeto irmão Delta Intelligence, 2026-07-03/2026-07-16). Uso
+// estritamente somente-leitura: pesquisa/filtra, nunca grava nada — mesma
+// exceção já autorizada e validada lá.
+async function postLookupBetha(caminho, corpoBase) {
+  const headers = await resolverHeaders()
+  if (!headers) {
+    throw new Error('Sessão do Betha Contratos não capturada. Abra contratos.betha.cloud, faça login e tente de novo.')
+  }
+
+  const accept = 'application/json, application/vnd.betha.lookup.LISTA+json'
+  const url = `https://${BETHA_CONTRATOS.apiHost}${BETHA_CONTRATOS.basePath}/${caminho}?Accept=${encodeURIComponent(accept)}`
+
+  const PAGINA = 20
+  const MAX = 200
+  const todos = []
+  let offset = 0
+  let hasNext = true
+
+  while (hasNext && offset < MAX) {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: montarAuthorization(headers.authorization),
+        'App-Context': headers.appContext,
+        'User-Access': headers.userAccess,
+        'Content-Type': 'application/json',
+        Accept: accept,
+      },
+      body: JSON.stringify({ ...corpoBase, limit: PAGINA, offset }),
+    })
+    if (!resp.ok) throw new Error(`API do Betha respondeu ${resp.status} ao buscar ${caminho}`)
+    const dados = await resp.json()
+    const pagina = Array.isArray(dados.content) ? dados.content : []
+    todos.push(...pagina)
+    if (!pagina.length || !dados.hasNext) break
+    hasNext = !!dados.hasNext
+    offset += PAGINA
+  }
+
+  return todos
+}
+
+// Solicitações de fornecimento vinculadas a um contrato. Endpoint e corpo
+// confirmados ao vivo no projeto irmão Delta Intelligence (2026-07-16,
+// contrato real 123/2026): passar o id REAL do contrato no path (em vez do
+// "0" usado na busca global por número) já escopa a lista pra esse contrato,
+// sem precisar filtrar depois — `filter: ''` e `gestaosolicitacoes: false`
+// (diferente da busca global por número, que usa filtro de texto e `true`).
+async function buscarSolicitacoesFornecimento(contratoId) {
+  const caminho = `${ENDPOINT_CONTRATACOES}/${limparId(contratoId)}/solicitacoesfornecimento/solicitacao-fornecimento-filtros`
+  return postLookupBetha(caminho, {
+    filter: '',
+    ambienteContratacao: AMBIENTE_CONTRATACAO_TODAS,
+    total: false,
+    sort: 'data desc, numeroSolicitacao desc',
+    gestaosolicitacoes: false,
+  })
 }
 
 async function enviarParaCentral(contrato) {

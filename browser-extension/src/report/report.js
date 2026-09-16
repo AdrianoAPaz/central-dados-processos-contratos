@@ -1,4 +1,9 @@
-import { montarCamposRelatorio, montarSecoesAditivos, montarTabelaItens } from '../shared/campos-relatorio.js'
+import {
+  montarCamposRelatorio,
+  montarSecoesAditivos,
+  montarTabelaItens,
+  montarSecoesSolicitacoesFornecimento,
+} from '../shared/campos-relatorio.js'
 import { criarZip } from '../shared/zip.js'
 
 const STORAGE_KEY = 'centralDados.relatorioAtual'
@@ -201,6 +206,29 @@ async function carregar() {
         semItens.textContent = `Aditivo ${secao.numero} sem itens vinculados`
         bloco.appendChild(semItens)
       }
+
+      container.appendChild(bloco)
+    }
+  }
+
+  // Solicitações de fornecimento vinculadas ao contrato — cada uma com TODOS
+  // os campos que a API devolveu (pedido do usuário: "todas as
+  // informações"), no mesmo estilo de seção dos aditivos.
+  const secoesSf = montarSecoesSolicitacoesFornecimento(contrato.solicitacoesFornecimento)
+  if (secoesSf.length) {
+    const container = document.getElementById('solicitacoesFornecimento')
+    const titulo = document.createElement('h2')
+    titulo.textContent = `Solicitações de fornecimento (${secoesSf.length})`
+    container.appendChild(titulo)
+
+    for (const secao of secoesSf) {
+      const bloco = document.createElement('div')
+      bloco.className = 'aditivo-secao'
+
+      const h3 = document.createElement('h3')
+      h3.textContent = secao.titulo
+      bloco.appendChild(h3)
+      bloco.appendChild(criarTabelaCampos(secao.campos))
 
       container.appendChild(bloco)
     }

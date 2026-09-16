@@ -122,6 +122,24 @@ export function montarSecoesAditivos(aditivos) {
   })
 }
 
+// Cada solicitação de fornecimento vinculada ao contrato vira uma SEÇÃO
+// própria — mostra TODOS os campos que a API devolve (pedido do usuário:
+// "todas as informações"), sem recorte pra um subconjunto fixo (diferente de
+// CAMPOS_ITEM). Já vem ordenada pela própria API (`sort: data desc`), não
+// reordenamos aqui. `numeroAno` já é o número formatado pelo próprio Betha
+// (ex.: "2373/2026") — confirmado no projeto irmão Delta Intelligence
+// (CONTEXTO_PROJETO.md §5).
+export function montarSecoesSolicitacoesFornecimento(solicitacoes) {
+  if (!Array.isArray(solicitacoes) || !solicitacoes.length) return []
+
+  return solicitacoes.map((raw, index) => {
+    const numero = (raw && (raw.numeroAno || (raw.numero != null ? String(raw.numero) : null))) || null
+    const titulo = numero ? `Solicitação de fornecimento ${numero}` : `Solicitação de fornecimento ${index + 1}`
+    const campos = Object.entries(raw || {}).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorTexto(valor) }))
+    return { titulo, campos }
+  })
+}
+
 function formatarChave(chave) {
   return chave.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase())
 }

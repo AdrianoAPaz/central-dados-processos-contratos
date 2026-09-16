@@ -70,20 +70,23 @@ function renderCandidatos(lista) {
   }
 }
 
-// Aditivos e itens são sub-recursos (contratacoes/{id}/aditivos,
-// contratacoes/{id}/itens) — não vêm na busca inicial. Busca só quando o
-// usuário efetivamente age sobre UM contrato (enviar/gerar PDF), evitando
-// N+1 requisições pra cada candidato da lista. Itens de cada aditivo (se
-// existirem) vêm aninhados dentro do próprio aditivo.
+// Aditivos, itens e solicitações de fornecimento são sub-recursos
+// (contratacoes/{id}/aditivos, contratacoes/{id}/itens,
+// contratacoes/{id}/solicitacoesfornecimento/...) — não vêm na busca inicial.
+// Busca só quando o usuário efetivamente age sobre UM contrato (enviar/gerar
+// PDF), evitando N+1 requisições pra cada candidato da lista. Itens de cada
+// aditivo (se existirem) vêm aninhados dentro do próprio aditivo.
 async function comDetalhes(contrato) {
   if (contrato.id == null) return contrato
 
-  const [respAditivos, respItens] = await Promise.all([
+  const [respAditivos, respItens, respSf] = await Promise.all([
     chrome.runtime.sendMessage({ type: 'buscar-aditivos', id: contrato.id }),
     chrome.runtime.sendMessage({ type: 'buscar-itens', id: contrato.id }),
+    chrome.runtime.sendMessage({ type: 'buscar-solicitacoes-fornecimento', id: contrato.id }),
   ])
   if (respAditivos && respAditivos.erro) throw new Error(respAditivos.erro)
   if (respItens && respItens.erro) throw new Error(respItens.erro)
+  if (respSf && respSf.erro) throw new Error(respSf.erro)
 
   const aditivos = respAditivos.aditivos || []
   const aditivosComItens = await Promise.all(
@@ -98,11 +101,16 @@ async function comDetalhes(contrato) {
     }),
   )
 
-  return { ...contrato, itens: respItens.itens || [], aditivos: aditivosComItens }
+  return {
+    ...contrato,
+    itens: respItens.itens || [],
+    aditivos: aditivosComItens,
+    solicitacoesFornecimento: respSf.solicitacoes || [],
+  }
 }
 
 async function enviar(contrato, botao) {
-  mostrarMsg('Buscando aditivos e itens…', 'info')
+  mostrarMsg('Buscando aditivos, itens e solicitações de fornecimento…', 'info')
   botao.disabled = true
   try {
     const contratoCompleto = await comDetalhes(contrato)
@@ -124,7 +132,7 @@ const CHAVE_RELATORIO = 'centralDados.relatorioAtual'
 // nativa de impressão do Chrome, sem precisar de nenhuma biblioteca.
 async function gerarPdf(contrato, botao) {
   if (botao) botao.disabled = true
-  mostrarMsg('Buscando aditivos e itens…', 'info')
+  mostrarMsg('Buscando aditivos, itens e solicitações de fornecimento…', 'info')
   try {
     const contratoCompleto = await comDetalhes(contrato)
     await chrome.storage.local.set({ [CHAVE_RELATORIO]: contratoCompleto })
