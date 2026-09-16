@@ -245,18 +245,37 @@ function rotuloAditivo(aditivo: { ordem: number; sequencial: number | null }): s
 // não o restante do catálogo bruto do Betha). Cada campo tenta várias chaves
 // candidatas, em ordem — `qtdItem`/`valorItem`/`valorTotal`/`unidadeMedida`
 // confirmados ao vivo pelo usuário (2026-09-16, item de aditivo); "Nº do
-// item"/"Descrição" ainda não, mantidos como palpite defensivo.
-const CAMPOS_ITEM: Array<{ header: string; key: string; chaves: string[]; moeda?: boolean }> = [
+// item"/"Descrição" ainda não, mantidos como palpite defensivo. `extrair` tem
+// prioridade sobre `chaves` quando presente — usado pros dois campos que só
+// existem aninhados num sub-objeto (confirmado ao vivo pelo usuário,
+// 2026-09-16, item do contrato em si, não de aditivo):
+// unidadeMedida.simbolo (ex.: "MES") e itemPropostaBO.valorUnitarioPercentual.
+const CAMPOS_ITEM: Array<{ header: string; key: string; chaves: string[]; extrair?: (raw: Record<string, unknown>) => unknown; moeda?: boolean }> = [
   { header: 'Nº do item', key: 'numero', chaves: ['numero', 'numeroItem', 'item', 'ordem'] },
   { header: 'Descrição', key: 'descricao', chaves: ['material', 'especificacao', 'descricaoItem', 'descricao'] },
-  { header: 'Unidade', key: 'unidade', chaves: ['unidadeMedida', 'unidade', 'unidade_medida', 'undMedida'] },
+  {
+    header: 'Unidade',
+    key: 'unidade',
+    chaves: ['unidade', 'unidade_medida', 'undMedida'],
+    extrair: (raw) => (raw.unidadeMedida as Record<string, unknown> | undefined)?.simbolo,
+  },
   { header: 'Quantidade', key: 'quantidade', chaves: ['qtdItem', 'quantidade', 'qtde', 'qtd'] },
-  { header: 'Valor unitário (R$)', key: 'valorUnitario', chaves: ['valorItem', 'valorUnitario', 'valorUnit', 'precoUnitario'], moeda: true },
+  {
+    header: 'Valor unitário (R$)',
+    key: 'valorUnitario',
+    chaves: ['valorItem', 'valorUnitario', 'valorUnit', 'precoUnitario'],
+    extrair: (raw) => (raw.itemPropostaBO as Record<string, unknown> | undefined)?.valorUnitarioPercentual,
+    moeda: true,
+  },
   { header: 'Valor total (R$)', key: 'valorTotal', chaves: ['valorTotal', 'valor'], moeda: true },
 ];
 
-function extrairCampoItem(raw: Record<string, unknown>, chaves: string[]): unknown {
-  for (const chave of chaves) {
+function extrairCampoItem(raw: Record<string, unknown>, campo: { chaves: string[]; extrair?: (raw: Record<string, unknown>) => unknown }): unknown {
+  if (campo.extrair) {
+    const viaExtrator = campo.extrair(raw);
+    if (viaExtrator !== undefined && viaExtrator !== null) return viaExtrator;
+  }
+  for (const chave of campo.chaves) {
     if (raw[chave] !== undefined) return raw[chave];
   }
   return undefined;
@@ -282,7 +301,7 @@ function preencherPlanilhaItens(
   for (const linha of linhas) {
     const registro: Record<string, unknown> = colunaFixa ? { [colunaFixa.key]: linha.__fixo } : {};
     for (const campo of CAMPOS_ITEM) {
-      const bruto = extrairCampoItem(linha.raw, campo.chaves);
+      const bruto = extrairCampoItem(linha.raw, campo);
       registro[campo.key] = campo.moeda && bruto != null ? Number(bruto) : valorCelula(bruto);
     }
     planilha.addRow(registro);

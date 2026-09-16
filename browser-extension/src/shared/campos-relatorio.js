@@ -37,19 +37,36 @@ export function montarCamposRelatorio(c) {
 // não o restante do catálogo bruto do Betha). Cada campo tenta várias chaves
 // candidatas, em ordem — `qtdItem`/`valorItem`/`valorTotal`/`unidadeMedida`
 // confirmados ao vivo pelo usuário (2026-09-16, item de aditivo); "Nº do
-// item"/"Descrição" ainda não, mantidos como palpite defensivo.
+// item"/"Descrição" ainda não, mantidos como palpite defensivo. `extrair` tem
+// prioridade sobre `chaves` quando presente — usado pros dois campos que só
+// existem aninhados num sub-objeto (confirmado ao vivo pelo usuário,
+// 2026-09-16, item do contrato em si, não de aditivo):
+// unidadeMedida.simbolo (ex.: "MES") e itemPropostaBO.valorUnitarioPercentual.
 const CAMPOS_ITEM = [
   { header: 'Nº do item', chaves: ['numero', 'numeroItem', 'item', 'ordem'] },
   { header: 'Descrição', chaves: ['material', 'especificacao', 'descricaoItem', 'descricao'] },
-  { header: 'Unidade', chaves: ['unidadeMedida', 'unidade', 'unidade_medida', 'undMedida'] },
+  {
+    header: 'Unidade',
+    chaves: ['unidade', 'unidade_medida', 'undMedida'],
+    extrair: (raw) => raw.unidadeMedida && raw.unidadeMedida.simbolo,
+  },
   { header: 'Quantidade', chaves: ['qtdItem', 'quantidade', 'qtde', 'qtd'] },
-  { header: 'Valor unitário (R$)', chaves: ['valorItem', 'valorUnitario', 'valorUnit', 'precoUnitario'], moeda: true },
+  {
+    header: 'Valor unitário (R$)',
+    chaves: ['valorItem', 'valorUnitario', 'valorUnit', 'precoUnitario'],
+    extrair: (raw) => raw.itemPropostaBO && raw.itemPropostaBO.valorUnitarioPercentual,
+    moeda: true,
+  },
   { header: 'Valor total (R$)', chaves: ['valorTotal', 'valor'], moeda: true },
 ]
 
-function extrairCampoItem(raw, chaves) {
+function extrairCampoItem(raw, campo) {
   if (!raw || typeof raw !== 'object') return undefined
-  for (const chave of chaves) {
+  if (campo.extrair) {
+    const viaExtrator = campo.extrair(raw)
+    if (viaExtrator !== undefined && viaExtrator !== null) return viaExtrator
+  }
+  for (const chave of campo.chaves) {
     if (raw[chave] !== undefined) return raw[chave]
   }
   return undefined
@@ -63,7 +80,7 @@ export function montarTabelaItens(registros) {
     colunas: CAMPOS_ITEM.map((c) => c.header),
     linhas: registros.map((raw) =>
       CAMPOS_ITEM.map((c) => {
-        const bruto = extrairCampoItem(raw, c.chaves)
+        const bruto = extrairCampoItem(raw, c)
         return c.moeda ? formatarValor(bruto) : valorTexto(bruto)
       }),
     ),
