@@ -35,16 +35,15 @@ export function montarCamposRelatorio(c) {
 
 // Colunas fixas do relatório de itens (pedido do usuário: só isso interessa,
 // não o restante do catálogo bruto do Betha). Cada campo tenta várias chaves
-// candidatas, em ordem, já que o nome exato usado pelo Betha pra "unidade de
-// medida"/"valor unitário" não foi confirmado ao vivo — se o nome real for
-// outro, cai em branco em vez de mostrar errado; ajustar a lista aqui assim
-// que confirmado.
+// candidatas, em ordem — `qtdItem`/`valorItem`/`valorTotal`/`unidadeMedida`
+// confirmados ao vivo pelo usuário (2026-09-16, item de aditivo); "Nº do
+// item"/"Descrição" ainda não, mantidos como palpite defensivo.
 const CAMPOS_ITEM = [
   { header: 'Nº do item', chaves: ['numero', 'numeroItem', 'item', 'ordem'] },
   { header: 'Descrição', chaves: ['material', 'especificacao', 'descricaoItem', 'descricao'] },
   { header: 'Unidade', chaves: ['unidadeMedida', 'unidade', 'unidade_medida', 'undMedida'] },
-  { header: 'Quantidade', chaves: ['quantidade', 'qtde', 'qtd'] },
-  { header: 'Valor unitário (R$)', chaves: ['valorUnitario', 'valorUnit', 'precoUnitario'], moeda: true },
+  { header: 'Quantidade', chaves: ['qtdItem', 'quantidade', 'qtde', 'qtd'] },
+  { header: 'Valor unitário (R$)', chaves: ['valorItem', 'valorUnitario', 'valorUnit', 'precoUnitario'], moeda: true },
   { header: 'Valor total (R$)', chaves: ['valorTotal', 'valor'], moeda: true },
 ]
 

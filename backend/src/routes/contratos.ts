@@ -243,16 +243,15 @@ function rotuloAditivo(aditivo: { ordem: number; sequencial: number | null }): s
 
 // Colunas fixas do relatório de itens (pedido do usuário: só isso interessa,
 // não o restante do catálogo bruto do Betha). Cada campo tenta várias chaves
-// candidatas, em ordem, já que o nome exato usado pelo Betha pra "unidade de
-// medida"/"valor unitário" não foi confirmado ao vivo — se o nome real for
-// outro, cai em branco em vez de mostrar errado; ajustar a lista aqui assim
-// que confirmado.
+// candidatas, em ordem — `qtdItem`/`valorItem`/`valorTotal`/`unidadeMedida`
+// confirmados ao vivo pelo usuário (2026-09-16, item de aditivo); "Nº do
+// item"/"Descrição" ainda não, mantidos como palpite defensivo.
 const CAMPOS_ITEM: Array<{ header: string; key: string; chaves: string[]; moeda?: boolean }> = [
   { header: 'Nº do item', key: 'numero', chaves: ['numero', 'numeroItem', 'item', 'ordem'] },
   { header: 'Descrição', key: 'descricao', chaves: ['material', 'especificacao', 'descricaoItem', 'descricao'] },
   { header: 'Unidade', key: 'unidade', chaves: ['unidadeMedida', 'unidade', 'unidade_medida', 'undMedida'] },
-  { header: 'Quantidade', key: 'quantidade', chaves: ['quantidade', 'qtde', 'qtd'] },
-  { header: 'Valor unitário (R$)', key: 'valorUnitario', chaves: ['valorUnitario', 'valorUnit', 'precoUnitario'], moeda: true },
+  { header: 'Quantidade', key: 'quantidade', chaves: ['qtdItem', 'quantidade', 'qtde', 'qtd'] },
+  { header: 'Valor unitário (R$)', key: 'valorUnitario', chaves: ['valorItem', 'valorUnitario', 'valorUnit', 'precoUnitario'], moeda: true },
   { header: 'Valor total (R$)', key: 'valorTotal', chaves: ['valorTotal', 'valor'], moeda: true },
 ];
 
