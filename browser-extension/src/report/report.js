@@ -1,4 +1,5 @@
 import { montarCamposRelatorio, montarSecoesAditivos, montarTabelaItens } from '../shared/campos-relatorio.js'
+import { criarZip } from '../shared/zip.js'
 
 const STORAGE_KEY = 'centralDados.relatorioAtual'
 
@@ -63,12 +64,40 @@ function nomeAnexo(a) {
   return a.nome || a.nomeArquivo || a.descricao || a.titulo || 'Anexo'
 }
 
-// Baixa cada anexo (um de cada vez — em paralelo o Chrome bloqueia downloads
-// automáticos em sequência rápida) via service worker, que tem a sessão do
-// Betha, e dispara o download local a partir dos bytes recebidos em base64 —
-// mesmo mecanismo do Delta Intelligence, sem precisar da permissão
-// `downloads` no manifest.
-async function baixarAnexosAutomaticamente(anexos, container) {
+// Evita colisão de nome dentro do zip (dois anexos "edital.pdf" — um do
+// contrato, outro de um aditivo — sobrescreveriam um ao outro na extração
+// sem isto). Mantém o nome original na 1ª ocorrência.
+function nomeUnicoNoZip(nome, usados) {
+  if (!usados.has(nome)) {
+    usados.add(nome)
+    return nome
+  }
+  const pontoFinal = nome.lastIndexOf('.')
+  const base = pontoFinal > 0 ? nome.slice(0, pontoFinal) : nome
+  const extensao = pontoFinal > 0 ? nome.slice(pontoFinal) : ''
+  let n = 2
+  let candidato = `${base} (${n})${extensao}`
+  while (usados.has(candidato)) {
+    n += 1
+    candidato = `${base} (${n})${extensao}`
+  }
+  usados.add(candidato)
+  return candidato
+}
+
+function nomeArquivoZip(contrato) {
+  const numero = contrato.numeroTermo != null
+    ? (contrato.ano ? `${contrato.numeroTermo}-${contrato.ano}` : String(contrato.numeroTermo))
+    : `seq-${contrato.sequencial ?? 'contrato'}`
+  return `anexos-contrato-${numero}.zip`
+}
+
+// Baixa cada anexo via service worker (que tem a sessão do Betha) e agrupa
+// todos num único .zip (pedido do usuário — em vez de um download separado
+// por arquivo). Sequencial, não em paralelo: rajada de requisições autenticadas
+// de uma vez arrisca rate-limit oculto no Betha (mesma cautela do Delta
+// Intelligence para POSTs em sequência).
+async function baixarAnexosAutomaticamente(anexos, container, contrato) {
   if (!anexos.length) return
 
   const titulo = document.createElement('h2')
@@ -78,6 +107,9 @@ async function baixarAnexosAutomaticamente(anexos, container) {
   const lista = document.createElement('ul')
   lista.className = 'lista-anexos'
   container.appendChild(lista)
+
+  const usados = new Set()
+  const baixados = []
 
   for (const anexo of anexos) {
     const li = document.createElement('li')
@@ -93,20 +125,30 @@ async function baixarAnexosAutomaticamente(anexos, container) {
       const bin = atob(resp.base64)
       const bytes = new Uint8Array(bin.length)
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-      const blob = new Blob([bytes], { type: resp.mimeType || 'application/octet-stream' })
-      const objectUrl = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = objectUrl
-      link.download = nomeAnexo(anexo)
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 10000)
+      baixados.push({ nome: nomeUnicoNoZip(nomeAnexo(anexo), usados), bytes })
       li.textContent = `✅ ${anexo.origem} — ${nomeAnexo(anexo)}`
     } catch (e) {
       li.textContent = `⚠️ ${anexo.origem} — ${nomeAnexo(anexo)} (erro: ${String((e && e.message) || e)})`
     }
   }
+
+  if (!baixados.length) return
+
+  const nomeZip = nomeArquivoZip(contrato)
+  const zipBlob = criarZip(baixados)
+  const objectUrl = URL.createObjectURL(zipBlob)
+  const link = document.createElement('a')
+  link.href = objectUrl
+  link.download = nomeZip
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 10000)
+
+  const resumo = document.createElement('p')
+  resumo.className = 'sem-itens'
+  resumo.textContent = `${baixados.length} de ${anexos.length} anexo(s) agrupado(s) em ${nomeZip}`
+  container.appendChild(resumo)
 }
 
 async function carregar() {
@@ -167,7 +209,7 @@ async function carregar() {
   // Baixa os anexos automaticamente ao abrir o relatório — pedido do
   // usuário: gerar o PDF já deve trazer os documentos do contrato junto,
   // sem precisar de um clique extra.
-  await baixarAnexosAutomaticamente(coletarAnexos(contrato), document.getElementById('anexos'))
+  await baixarAnexosAutomaticamente(coletarAnexos(contrato), document.getElementById('anexos'), contrato)
 
   // Consumido uma vez — evita reabrir a mesma aba (ex.: F5) mostrando dados de
   // um relatório antigo por engano.

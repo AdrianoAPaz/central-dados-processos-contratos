@@ -54,6 +54,7 @@ export default tseslint.config(
         btoa: 'readonly',
         setTimeout: 'readonly',
         AbortSignal: 'readonly',
+        TextEncoder: 'readonly',
       },
     },
   },
