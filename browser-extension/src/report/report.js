@@ -5,6 +5,7 @@ import {
   montarSecoesSolicitacoesFornecimento,
 } from '../shared/campos-relatorio.js'
 import { criarZip } from '../shared/zip.js'
+import { gerarPdfRelatorio } from '../shared/pdf-relatorio.js'
 
 const STORAGE_KEY = 'centralDados.relatorioAtual'
 
@@ -97,16 +98,15 @@ function nomeArquivoZip(contrato) {
   return `anexos-contrato-${numero}.zip`
 }
 
-// Baixa cada anexo via service worker (que tem a sessão do Betha) e agrupa
-// todos num único .zip (pedido do usuário — em vez de um download separado
-// por arquivo). Sequencial, não em paralelo: rajada de requisições autenticadas
-// de uma vez arrisca rate-limit oculto no Betha (mesma cautela do Delta
-// Intelligence para POSTs em sequência).
-async function baixarAnexosAutomaticamente(anexos, container, contrato) {
-  if (!anexos.length) return
-
+// Gera o PDF do relatório e baixa cada anexo via service worker (que tem a
+// sessão do Betha), agrupando tudo num único .zip (pedido do usuário — em
+// vez de um download separado por arquivo). Anexos sequenciais, não em
+// paralelo: rajada de requisições autenticadas de uma vez arrisca
+// rate-limit oculto no Betha (mesma cautela do Delta Intelligence para
+// POSTs em sequência).
+async function montarPacoteRelatorio(contrato, anexos, container) {
   const titulo = document.createElement('h2')
-  titulo.textContent = `Anexos (${anexos.length})`
+  titulo.textContent = 'Anexos e relatório em PDF'
   container.appendChild(titulo)
 
   const lista = document.createElement('ul')
@@ -115,6 +115,18 @@ async function baixarAnexosAutomaticamente(anexos, container, contrato) {
 
   const usados = new Set()
   const baixados = []
+
+  const liPdf = document.createElement('li')
+  liPdf.textContent = '⏳ Relatório do contrato (PDF)'
+  lista.appendChild(liPdf)
+  try {
+    const pdfBlob = gerarPdfRelatorio(contrato)
+    const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer())
+    baixados.push({ nome: nomeUnicoNoZip('relatorio-contrato.pdf', usados), bytes: pdfBytes })
+    liPdf.textContent = '✅ Relatório do contrato (PDF)'
+  } catch (e) {
+    liPdf.textContent = `⚠️ Relatório do contrato (PDF) — erro: ${String((e && e.message) || e)}`
+  }
 
   for (const anexo of anexos) {
     const li = document.createElement('li')
@@ -152,7 +164,7 @@ async function baixarAnexosAutomaticamente(anexos, container, contrato) {
 
   const resumo = document.createElement('p')
   resumo.className = 'sem-itens'
-  resumo.textContent = `${baixados.length} de ${anexos.length} anexo(s) agrupado(s) em ${nomeZip}`
+  resumo.textContent = `${baixados.length} arquivo(s) agrupado(s) em ${nomeZip}`
   container.appendChild(resumo)
 }
 
@@ -234,10 +246,10 @@ async function carregar() {
     }
   }
 
-  // Baixa os anexos automaticamente ao abrir o relatório — pedido do
-  // usuário: gerar o PDF já deve trazer os documentos do contrato junto,
-  // sem precisar de um clique extra.
-  await baixarAnexosAutomaticamente(coletarAnexos(contrato), document.getElementById('anexos'), contrato)
+  // Gera o PDF do relatório e baixa os anexos automaticamente ao abrir a
+  // aba, agrupando tudo num único .zip — pedido do usuário: não precisa de
+  // clique extra nem de downloads separados.
+  await montarPacoteRelatorio(contrato, coletarAnexos(contrato), document.getElementById('anexos'))
 
   // Consumido uma vez — evita reabrir a mesma aba (ex.: F5) mostrando dados de
   // um relatório antigo por engano.

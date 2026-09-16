@@ -65,6 +65,11 @@
     <button id="imprimir">Salvar como PDF</button>
   </div>
 
+  <!-- Vendorizadas (sem CDN — CSP só permite 'self'; ver src/vendor/README.md).
+       Ordem importa: autotable se auto-registra em window.jspdf.jsPDF ao
+       carregar, então jsPDF tem que vir primeiro. -->
+  <script src="../vendor/jspdf.umd.min.js"></script>
+  <script src="../vendor/jspdf.plugin.autotable.min.js"></script>
   <script src="report.js" type="module"></script>
 </body>
 </html>
