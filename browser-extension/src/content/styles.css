@@ -62,3 +62,31 @@
   height: 90vh;
   border: none;
 }
+
+/* Botão flutuante usado no Betha Compras Cloud (ver menu-injector.js). */
+.central-dados-fab {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 2147482000;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: #4f46e5;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease, transform 0.05s ease;
+}
+
+.central-dados-fab:hover {
+  background: #4338ca;
+}
+
+.central-dados-fab:active {
+  transform: scale(0.96);
+}

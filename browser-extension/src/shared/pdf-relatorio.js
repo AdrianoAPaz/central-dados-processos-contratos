@@ -1,16 +1,23 @@
-// Gera o mesmo relatório da tela (report.js) como PDF de verdade, pra
-// empacotar junto com os anexos no zip (pedido do usuário) — `window.print()`
-// não devolve bytes, só abre o diálogo nativo do navegador, por isso não dá
-// pra usá-lo aqui. Usa jsPDF + jspdf-autotable vendorizados em
-// `src/vendor/` (ver README ali sobre por que são UMD e não ESM).
+// Gera o relatório da tela (report.js) como PDFs de verdade — um por
+// documento (contrato, cada aditivo, cada solicitação de fornecimento), pra
+// empacotar junto com os anexos no zip (pedido do usuário: relatórios
+// separados por documento). `window.print()` não devolve bytes, só abre o
+// diálogo nativo do navegador, por isso não dá pra usá-lo aqui. Usa jsPDF +
+// jspdf-autotable vendorizados em `src/vendor/` (ver README ali sobre por
+// que são UMD e não ESM).
 import {
   montarCamposRelatorio,
   montarSecoesAditivos,
   montarTabelaItens,
+  montarTabelaResponsaveis,
   montarSecoesSolicitacoesFornecimento,
+  montarSecoesInteracoesContabilidade,
+  montarSecoesRecebimentos,
+  tituloContrato,
 } from './campos-relatorio.js'
 
 const MARGEM = 40
+const SUBTITULO_PADRAO = 'Central de Dados de Processos e Contratos'
 
 function obterJsPDF() {
   const ns = window.jspdf
@@ -70,23 +77,31 @@ function desenharTabelaDinamica(doc, cursor, { colunas, linhas }) {
   return doc.lastAutoTable.finalY + 12
 }
 
-// Devolve um Blob (application/pdf) — pronto pra virar bytes (arrayBuffer)
-// e entrar no zip, ou pra download direto se um dia precisar sozinho.
-export function gerarPdfRelatorio(contrato) {
+// Cria um documento novo com o cabeçalho padrão (título do documento +
+// subtítulo institucional) — cada relatório (contrato/aditivo/solicitação) é
+// um jsPDF próprio, nunca compartilhado com os demais.
+function novoDocumento(titulo) {
   const jsPDF = obterJsPDF()
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
   let cursor = MARGEM
 
   doc.setFontSize(16)
   doc.setFont('helvetica', 'bold')
-  doc.text('Relatório de contrato', MARGEM, cursor)
+  doc.text(titulo, MARGEM, cursor)
   cursor += 18
   doc.setFontSize(10)
   doc.setFont('helvetica', 'normal')
-  doc.text('Central de Dados de Processos e Contratos', MARGEM, cursor)
+  doc.text(SUBTITULO_PADRAO, MARGEM, cursor)
   cursor += 22
 
-  cursor = desenharTabelaCampos(doc, cursor, montarCamposRelatorio(contrato))
+  return { doc, cursor }
+}
+
+// PDF com os dados do contrato + itens do contrato — sem aditivos nem
+// solicitações de fornecimento (cada um vira o seu próprio documento).
+export function gerarPdfContrato(contrato) {
+  const { doc, cursor: inicio } = novoDocumento(tituloContrato(contrato))
+  let cursor = desenharTabelaCampos(doc, inicio, montarCamposRelatorio(contrato))
 
   const tabelaItens = montarTabelaItens(contrato.itens)
   if (tabelaItens.linhas.length) {
@@ -94,33 +109,117 @@ export function gerarPdfRelatorio(contrato) {
     cursor = desenharTabelaDinamica(doc, cursor, tabelaItens)
   }
 
-  const secoesAditivos = montarSecoesAditivos(contrato.aditivos)
-  if (secoesAditivos.length) {
-    cursor = desenharTitulo(doc, cursor, `Aditivos (${secoesAditivos.length})`, 13)
-    for (const secao of secoesAditivos) {
-      cursor = desenharTitulo(doc, cursor, secao.titulo, 11)
-      cursor = desenharTabelaCampos(doc, cursor, secao.campos)
-      if (secao.tabelaItens.linhas.length) {
-        cursor = desenharTabelaDinamica(doc, cursor, secao.tabelaItens)
-      } else {
-        cursor = garantirEspaco(doc, cursor, 16)
-        doc.setFontSize(9)
-        doc.setFont('helvetica', 'italic')
-        doc.text(`${secao.titulo} sem itens vinculados`, MARGEM, cursor)
-        doc.setFont('helvetica', 'normal')
-        cursor += 18
-      }
-    }
-  }
-
-  const secoesSf = montarSecoesSolicitacoesFornecimento(contrato.solicitacoesFornecimento)
-  if (secoesSf.length) {
-    cursor = desenharTitulo(doc, cursor, `Solicitações de fornecimento (${secoesSf.length})`, 13)
-    for (const secao of secoesSf) {
-      cursor = desenharTitulo(doc, cursor, secao.titulo, 11)
-      cursor = desenharTabelaCampos(doc, cursor, secao.campos)
-    }
+  const tabelaResponsaveis = montarTabelaResponsaveis(contrato.responsaveis)
+  if (tabelaResponsaveis.linhas.length) {
+    cursor = desenharTitulo(doc, cursor, `Responsáveis (${contrato.responsaveis.length})`, 13)
+    desenharTabelaDinamica(doc, cursor, tabelaResponsaveis)
   }
 
   return doc.output('blob')
+}
+
+// PDF de UM aditivo (campos + itens vinculados a ele) — `secao` é uma
+// entrada de montarSecoesAditivos.
+export function gerarPdfAditivo(secao) {
+  const { doc, cursor: inicio } = novoDocumento(secao.titulo)
+  let cursor = desenharTabelaCampos(doc, inicio, secao.campos)
+
+  if (secao.tabelaItens.linhas.length) {
+    cursor = desenharTitulo(doc, cursor, 'Itens', 13)
+    desenharTabelaDinamica(doc, cursor, secao.tabelaItens)
+  } else {
+    cursor = garantirEspaco(doc, cursor, 16)
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'italic')
+    doc.text('Sem itens vinculados', MARGEM, cursor)
+    doc.setFont('helvetica', 'normal')
+  }
+
+  return doc.output('blob')
+}
+
+// PDF de UMA solicitação de fornecimento (todos os campos que a API
+// devolveu) — `secao` é uma entrada de montarSecoesSolicitacoesFornecimento.
+export function gerarPdfSolicitacaoFornecimento(secao) {
+  const { doc, cursor: inicio } = novoDocumento(secao.titulo)
+  desenharTabelaCampos(doc, inicio, secao.campos)
+  return doc.output('blob')
+}
+
+// PDF de UMA interação contábil (todos os campos que a API devolveu) —
+// `secao` é uma entrada de montarSecoesInteracoesContabilidade.
+export function gerarPdfInteracaoContabilidade(secao) {
+  const { doc, cursor: inicio } = novoDocumento(secao.titulo)
+  desenharTabelaCampos(doc, inicio, secao.campos)
+  return doc.output('blob')
+}
+
+// PDF com os recebimentos de UMA solicitação de fornecimento — documento
+// próprio, separado do PDF da solicitação em si (pedido do usuário,
+// 2026-09-17). Cada recebimento é um bloco com TODOS os campos que a API
+// devolveu (não uma tabela de colunas fixas — a tela "Editando recebimento"
+// do Betha tem bem mais informação que a listagem: desconto, retenção
+// tributária, provisório, observações, comprovantes). `secao` é uma entrada
+// de montarSecoesRecebimentos. Logo abaixo dos campos de cada recebimento,
+// os itens efetivamente recebidos (pedido do usuário, 2026-09-17) — mesmo
+// estilo campos+itens de gerarPdfAditivo.
+export function gerarPdfRecebimentos(secao) {
+  const { doc, cursor: inicioDoc } = novoDocumento(secao.titulo)
+  let cursor = inicioDoc
+  for (const recebimento of secao.recebimentos) {
+    cursor = desenharTitulo(doc, cursor, recebimento.titulo, 12)
+    cursor = desenharTabelaCampos(doc, cursor, recebimento.campos)
+
+    if (recebimento.tabelaItens.linhas.length) {
+      cursor = desenharTitulo(doc, cursor, 'Itens', 11)
+      cursor = desenharTabelaDinamica(doc, cursor, recebimento.tabelaItens)
+    } else {
+      cursor = garantirEspaco(doc, cursor, 16)
+      doc.setFontSize(9)
+      doc.setFont('helvetica', 'italic')
+      doc.text('Sem itens vinculados', MARGEM, cursor)
+      doc.setFont('helvetica', 'normal')
+      cursor += 20
+    }
+  }
+  return doc.output('blob')
+}
+
+// Nome de arquivo a partir da descrição do documento (ex.: "aditivo 1" ->
+// "aditivo-1") — sem acento, minúsculo, só letras/números separados por
+// hífen.
+function slug(texto) {
+  return texto
+    .normalize('NFD')
+    .replace(/\p{Mn}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+}
+
+// Lista os documentos a gerar pro relatório completo — um por contrato, um
+// por aditivo, um por solicitação de fornecimento — sem gerar os bytes ainda
+// (`gerar` é preguiçoso, pra quem consome poder tratar erro de um documento
+// sem derrubar os demais). Nome do arquivo é a própria descrição do
+// documento (ex.: "aditivo 1" -> "aditivo-1.pdf").
+export function listarDocumentosRelatorio(contrato) {
+  const documentos = [{ nome: `${slug(tituloContrato(contrato))}.pdf`, gerar: () => gerarPdfContrato(contrato) }]
+
+  for (const secao of montarSecoesAditivos(contrato.aditivos)) {
+    documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfAditivo(secao) })
+  }
+
+  for (const secao of montarSecoesSolicitacoesFornecimento(contrato.solicitacoesFornecimento)) {
+    documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfSolicitacaoFornecimento(secao) })
+  }
+
+  for (const secao of montarSecoesInteracoesContabilidade(contrato.interacoesContabilidade)) {
+    documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfInteracaoContabilidade(secao) })
+  }
+
+  for (const secao of montarSecoesRecebimentos(contrato.solicitacoesFornecimento)) {
+    documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfRecebimentos(secao) })
+  }
+
+  return documentos
 }

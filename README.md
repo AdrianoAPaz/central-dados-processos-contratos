@@ -56,6 +56,19 @@ uma porta só. Ver `deploy-guide.md` pra publicar.
 Sem login (CLAUDE.md 1.5) — o schema do Prisma começa vazio; a feature de exemplo `tasks` do
 template original (que dependia de usuário autenticado) foi removida.
 
+## Processos administrativos (Betha Compras Cloud)
+
+A extensão de navegador (`browser-extension/`) tem, além da busca de contratos, o campo **Processo
+administrativo (Compras Cloud) — Número/Ano**. Ela busca o processo (e seus lotes, itens,
+fornecedores/propostas e documentos) usando a sua sessão logada em `compras.betha.cloud` e envia
+para `POST /api/processos`; a página **Processos administrativos** do frontend lista o que foi
+enviado e baixa o relatório em Excel (`GET /api/processos/:id/relatorio`).
+
+Pra funcionar, abra `compras.betha.cloud`, faça login e navegue por qualquer tela (é assim que a
+extensão captura a sessão). **Os endpoints do Compras Cloud ainda não foram confirmados ao vivo** —
+ver `browser-extension/src/shared/constants.js` (`BETHA_COMPRAS`, `ENDPOINT_PROCESSOS`,
+`SUBRECURSOS_PROCESSO`) e o filtro em `buscarProcessos` no `service-worker.js`.
+
 ## Comandos úteis
 
 | Comando              | O que faz                                                    |

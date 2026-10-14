@@ -13,10 +13,10 @@ datasource db {
 // guarda o JSON completo importado, pra nunca perder informação que ainda não
 // virou coluna própria.
 model Contrato {
-  id     String @id @default(cuid())
+  id         String @id @default(cuid())
   // Identificador único e universal na API do Betha (tooltip "Sequência da
   // contratação" na UI) — nunca se repete, mesmo entre tipos diferentes.
-  sequencial Int @unique
+  sequencial Int    @unique
 
   numeroTermo         Int?
   ano                 Int?
@@ -50,8 +50,11 @@ model Contrato {
   // completa, além das colunas achatadas acima.
   dadosBrutos Json @map("dados_brutos")
 
-  aditivos Aditivo[]
-  itens    Item[]
+  aditivos                 Aditivo[]
+  itens                    Item[]
+  solicitacoesFornecimento SolicitacaoFornecimento[]
+  responsaveis             ResponsavelContrato[]
+  interacoesContabilidade  InteracaoContabilidade[]
 
   criadoEm     DateTime @default(now()) @map("criado_em")
   atualizadoEm DateTime @updatedAt @map("atualizado_em")
@@ -106,4 +109,218 @@ model Item {
 
   @@unique([contratoId, aditivoId, ordem])
   @@map("item")
+}
+
+// Um item do sub-recurso `contratacoes/{id}/solicitacoesfornecimento` do
+// Betha Contratos — buscado ao vivo pela extensão de navegador (GET na
+// coleção responde 405; usa o endpoint de filtros, ver
+// browser-extension/src/background/service-worker.js). Mesmo motivo dos
+// models Aditivo/Item pra não achatar campos: catálogo completo não
+// confirmado, guardamos o JSON cru e deixamos o relatório extrair o que
+// existir dinamicamente. `ordem` é a posição no array recebido (já vem
+// ordenado pela própria API do Betha, `sort: data desc, numeroSolicitacao
+// desc` — não reordenamos aqui).
+model SolicitacaoFornecimento {
+  id         String   @id @default(cuid())
+  contratoId String   @map("contrato_id")
+  contrato   Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+
+  ordem Int
+
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  recebimentos Recebimento[]
+
+  @@unique([contratoId, ordem])
+  @@map("solicitacao_fornecimento")
+}
+
+// Um item do sub-recurso `contratacoes/{id}/solicitacoesfornecimento/{sfId}/
+// recebimentos` do Betha Contratos — cada recebimento (parcial ou
+// definitivo) vinculado a UMA solicitação de fornecimento específica.
+// Endpoint confirmado ao vivo pelo usuário (2026-09-17, contrato real
+// 8807027, solicitação 18226527): GET simples (não é lookup POST como
+// solicitações/interações), paginado por offset/hasNext no mesmo formato de
+// buscarSubrecurso. Mesmo motivo dos demais sub-recursos pra não achatar
+// campos: guardamos o JSON cru e deixamos o relatório extrair todos os
+// campos dinamicamente (pedido do usuário: a tela "Editando recebimento" do
+// Betha tem bem mais informação que a listagem). `itens` (sub-recurso à
+// parte, ver model ItemRecebimento) é removido do JSON antes de gravar aqui,
+// pra não duplicar o dado. `ordem` é a posição no array recebido.
+model Recebimento {
+  id            String                  @id @default(cuid())
+  solicitacaoId String                  @map("solicitacao_id")
+  solicitacao   SolicitacaoFornecimento @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
+
+  ordem Int
+
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  itens ItemRecebimento[]
+
+  @@unique([solicitacaoId, ordem])
+  @@map("recebimento")
+}
+
+// Um item do sub-recurso `contratacoes/{id}/solicitacoesfornecimento/{sfId}/
+// recebimentos/{recebimentoId}/itens` do Betha Contratos — os itens do
+// catálogo efetivamente recebidos num recebimento específico. Endpoint
+// confirmado ao vivo pelo usuário (2026-09-17, contrato real 8807027,
+// solicitação 18226527, recebimento 6933800): GET simples, mesmo formato de
+// paginação de Recebimento. Modelo próprio (em vez de reaproveitar `Item`,
+// que é dos itens do contrato/aditivo) pra não mexer na constraint única já
+// em uso por aquele — mesmo catálogo de campos (numero, material,
+// unidadeMedida, quantidade, vlUnitario, vlTotal), extraído dinamicamente
+// pelo relatório com as mesmas colunas fixas de Item (ver CAMPOS_ITEM).
+model ItemRecebimento {
+  id            String      @id @default(cuid())
+  recebimentoId String      @map("recebimento_id")
+  recebimento   Recebimento @relation(fields: [recebimentoId], references: [id], onDelete: Cascade)
+
+  ordem Int
+
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  @@unique([recebimentoId, ordem])
+  @@map("item_recebimento")
+}
+
+// Um item do sub-recurso `contratacoes/{id}/interacaocontabil/integracao-filtros`
+// do Betha Contratos — cada ação de contabilização vinculada ao contrato
+// (empenhar/liquidar/pagar), buscado ao vivo pela extensão de navegador.
+// Endpoint (lookup POST, mesmo padrão de solicitações de fornecimento)
+// confirmado ao vivo pelo usuário (2026-09-17). Mesmo motivo dos demais
+// sub-recursos pra não achatar campos: guardamos o JSON cru e deixamos o
+// relatório extrair o que existir dinamicamente. `ordem` é a posição no
+// array recebido, mesma regra dos demais.
+model InteracaoContabilidade {
+  id         String   @id @default(cuid())
+  contratoId String   @map("contrato_id")
+  contrato   Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+
+  ordem Int
+
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  @@unique([contratoId, ordem])
+  @@map("interacao_contabilidade")
+}
+
+// Um item do sub-recurso `contratacoes/{id}/responsaveiscontratacao` do
+// Betha Contratos — fiscal, gestor etc. do contrato, com o período de
+// vigência de cada responsabilidade. Endpoint confirmado ao vivo pelo
+// usuário (2026-09-17); o catálogo de campos em si não foi (mesmo motivo dos
+// demais sub-recursos pra não achatar campos: guardamos o JSON cru e
+// deixamos o relatório extrair tipo/período dinamicamente).
+model ResponsavelContrato {
+  id         String   @id @default(cuid())
+  contratoId String   @map("contrato_id")
+  contrato   Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+
+  ordem Int
+
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  @@unique([contratoId, ordem])
+  @@map("responsavel_contrato")
+}
+
+// Um processo administrativo do Betha Compras Cloud (compras.betha.cloud) —
+// buscado ao vivo pela extensão de navegador a partir do número/ano digitado
+// no popup. O catálogo de campos do Compras Cloud ainda NÃO foi confirmado ao
+// vivo (diferente do Betha Contratos), então só achatamos o mínimo necessário
+// pra listar/identificar o processo (extraído defensivamente, ver
+// backend/src/routes/processos.ts); `dadosBrutos` guarda o JSON completo pra
+// nunca perder informação. `idBetha` é o id interno do processo no Compras
+// Cloud (único), usado como chave do upsert. Um Contrato se relaciona com o
+// processo pelo par processoNumero/processoAno (sem chave estrangeira — o
+// processo pode ainda não ter sido importado).
+model ProcessoAdministrativo {
+  id      String @id @default(cuid())
+  idBetha Int    @unique @map("id_betha")
+
+  numero          Int?
+  ano             Int?
+  // "45/2026" — numero + ano já formatados, pra exibir/exportar direto.
+  numeroFormatado String? @map("numero_formatado")
+  objeto          String?
+  modalidade      String?
+  situacao        String?
+  entidadeNome    String? @map("entidade_nome")
+
+  dadosBrutos Json @map("dados_brutos")
+
+  lotes        LoteProcesso[]
+  itens        ItemProcesso[]
+  fornecedores FornecedorProcesso[]
+  documentos   DocumentoProcesso[]
+
+  criadoEm     DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+
+  @@index([numero, ano])
+  @@map("processo_administrativo")
+}
+
+// Sub-recursos do processo administrativo (lotes, itens, fornecedores/
+// propostas e documentos/anexos). Mesmo motivo do model Aditivo pra não
+// achatar campos: catálogo não confirmado ao vivo, guardamos o JSON cru e o
+// relatório extrai as colunas dinamicamente. `ordem` é a posição no array
+// recebido. Documentos guardam só os metadados (nome, tipo, tamanho) — o
+// conteúdo dos arquivos não é baixado.
+model LoteProcesso {
+  id         String                 @id @default(cuid())
+  processoId String                 @map("processo_id")
+  processo   ProcessoAdministrativo @relation(fields: [processoId], references: [id], onDelete: Cascade)
+
+  ordem       Int
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  @@unique([processoId, ordem])
+  @@map("lote_processo")
+}
+
+model ItemProcesso {
+  id         String                 @id @default(cuid())
+  processoId String                 @map("processo_id")
+  processo   ProcessoAdministrativo @relation(fields: [processoId], references: [id], onDelete: Cascade)
+
+  ordem       Int
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  @@unique([processoId, ordem])
+  @@map("item_processo")
+}
+
+model FornecedorProcesso {
+  id         String                 @id @default(cuid())
+  processoId String                 @map("processo_id")
+  processo   ProcessoAdministrativo @relation(fields: [processoId], references: [id], onDelete: Cascade)
+
+  ordem       Int
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  @@unique([processoId, ordem])
+  @@map("fornecedor_processo")
+}
+
+model DocumentoProcesso {
+  id         String                 @id @default(cuid())
+  processoId String                 @map("processo_id")
+  processo   ProcessoAdministrativo @relation(fields: [processoId], references: [id], onDelete: Cascade)
+
+  ordem       Int
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  @@unique([processoId, ordem])
+  @@map("documento_processo")
 }

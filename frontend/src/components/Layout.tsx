@@ -1,7 +1,15 @@
 import type { ReactNode } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { APP_NAME } from '../config';
 
+const LINKS = [
+  { to: '/', label: 'Contratos' },
+  { to: '/processos', label: 'Processos administrativos' },
+];
+
 export function Layout({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation();
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -13,11 +21,12 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </div>
 
-        {/* Item de exemplo — acrescente mais conforme o projeto crescer. */}
         <nav className="sidebar-nav">
-          <a className="sidebar-link active" href="/">
-            Início
-          </a>
+          {LINKS.map((link) => (
+            <Link key={link.to} className={`sidebar-link${pathname === link.to ? ' active' : ''}`} to={link.to}>
+              {link.label}
+            </Link>
+          ))}
         </nav>
       </aside>
       <div className="main-content">{children}</div>

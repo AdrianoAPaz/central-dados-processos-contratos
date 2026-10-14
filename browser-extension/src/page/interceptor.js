@@ -5,12 +5,26 @@
 // Delta Intelligence (browser-extension/src/page/interceptor.js), restrito
 // só ao Betha Contratos.
 ;(function () {
-  function isBethaContratosApi(url) {
+  // Este script roda tanto no Betha Contratos quanto no Betha Compras Cloud
+  // (ver manifest.json). No Contratos só interessa a API conhecida; no
+  // Compras o host da API ainda não foi confirmado ao vivo, então vale
+  // qualquer requisição pra *.betha.cloud — `extrairAuth` já exige os três
+  // headers de sessão do Betha, então só chamadas reais de API passam. A
+  // origem + prefixo `/.../api` observados vão junto, pra extensão não
+  // depender do palpite de constants.js (BETHA_COMPRAS).
+  const SISTEMA_DA_PAGINA = window.location.hostname === 'compras.betha.cloud' ? 'compras' : 'contratos'
+
+  function infoDaApi(url) {
     try {
       const u = new URL(url, window.location.href)
-      return u.hostname === 'api.contratos.betha.cloud'
+      if (SISTEMA_DA_PAGINA === 'contratos') {
+        return u.hostname === 'api.contratos.betha.cloud' ? { sistema: 'contratos' } : null
+      }
+      if (u.protocol !== 'https:' || !/(^|\.)betha\.cloud$/.test(u.hostname)) return null
+      const prefixo = u.pathname.match(/^(.*?\/api)(\/|$)/)
+      return { sistema: 'compras', apiOrigin: u.origin, apiBasePath: prefixo ? prefixo[1] : '' }
     } catch {
-      return false
+      return null
     }
   }
 
@@ -22,10 +36,10 @@
     return null
   }
 
-  function despachar(headers) {
+  function despachar(headers, info) {
     const auth = extrairAuth(headers)
     if (!auth) return
-    window.postMessage({ __centralDadosType: 'headers-capturados', headers: auth }, '*')
+    window.postMessage({ __centralDadosType: 'headers-capturados', headers: auth, ...info }, '*')
   }
 
   function headersDeFetchInit(init) {
@@ -41,8 +55,13 @@
   const originalFetch = window.fetch.bind(window)
   window.fetch = function (input, init) {
     const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input)
-    if (isBethaContratosApi(url)) {
-      despachar(headersDeFetchInit(init))
+    const info = infoDaApi(url)
+    if (info) {
+      // `new Request(url, { headers })` também é usado pelos SPAs — os headers
+      // podem estar no próprio Request, não só no `init`.
+      const headers = headersDeFetchInit(init)
+      if (input instanceof Request) input.headers.forEach((v, k) => { if (!(k in headers)) headers[k] = v })
+      despachar(headers, info)
     }
     return originalFetch(input, init)
   }
@@ -64,8 +83,9 @@
   }
 
   XHRProto.send = function (body) {
-    if (this.__cd_url && isBethaContratosApi(this.__cd_url)) {
-      despachar(this.__cd_headers || {})
+    const info = this.__cd_url ? infoDaApi(this.__cd_url) : null
+    if (info) {
+      despachar(this.__cd_headers || {}, info)
     }
     return originalSend.apply(this, arguments)
   }

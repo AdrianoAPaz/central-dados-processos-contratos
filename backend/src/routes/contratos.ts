@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import ExcelJS from 'exceljs';
+import archiver from 'archiver';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
 
@@ -98,6 +99,9 @@ contratosRouter.post('/', async (req, res) => {
   // aqui). Deletar os aditivos já cria em cascata a remoção dos itens deles.
   await prisma.aditivo.deleteMany({ where: { contratoId: contrato.id } });
   await prisma.item.deleteMany({ where: { contratoId: contrato.id, aditivoId: null } });
+  await prisma.solicitacaoFornecimento.deleteMany({ where: { contratoId: contrato.id } });
+  await prisma.responsavelContrato.deleteMany({ where: { contratoId: contrato.id } });
+  await prisma.interacaoContabilidade.deleteMany({ where: { contratoId: contrato.id } });
 
   // Ordem de exibição é cronológica pelo sequencial do próprio aditivo (não a
   // ordem em que a API devolveu) — `ordem` já nasce refletindo isso, então
@@ -140,6 +144,92 @@ contratosRouter.post('/', async (req, res) => {
       data: itensDoContrato.map((raw, i) => ({
         contratoId: contrato.id,
         aditivoId: null,
+        ordem: i + 1,
+        dadosBrutos: raw as Prisma.InputJsonObject,
+      })),
+    });
+  }
+
+  // Já vêm ordenadas pela própria API do Betha (sort: data desc,
+  // numeroSolicitacao desc) — não reordenamos aqui, `ordem` só reflete a
+  // posição recebida (ver comentário do model no schema.prisma). Recebimentos
+  // vêm aninhados dentro de cada solicitação (campo `recebimentos`, buscado à
+  // parte pela extensão em contratacoes/{id}/solicitacoesfornecimento/{sfId}/
+  // recebimentos) — por isso precisa do id de cada solicitação já criada
+  // antes de gravar os recebimentos dela, mesmo padrão do loop de
+  // aditivos/itens acima.
+  const solicitacoesFornecimento = Array.isArray(body.solicitacoesFornecimento)
+    ? (body.solicitacoesFornecimento as Record<string, unknown>[])
+    : [];
+  for (let i = 0; i < solicitacoesFornecimento.length; i++) {
+    const raw = solicitacoesFornecimento[i];
+    const { recebimentos: recebimentosRaw, ...dadosSf } = raw;
+    const recebimentosDaSf = Array.isArray(recebimentosRaw) ? (recebimentosRaw as Record<string, unknown>[]) : [];
+
+    const sfCriada = await prisma.solicitacaoFornecimento.create({
+      data: {
+        contratoId: contrato.id,
+        ordem: i + 1,
+        dadosBrutos: dadosSf as Prisma.InputJsonObject,
+      },
+    });
+
+    // Itens de cada recebimento (o que efetivamente foi recebido do
+    // catálogo) vêm aninhados dentro dele (campo `itens`, buscado à parte
+    // pela extensão em .../recebimentos/{recebimentoId}/itens) — mesmo
+    // motivo do loop de solicitações/recebimentos acima pra não usar
+    // createMany: precisa do id de cada recebimento já criado antes de
+    // gravar os itens dele.
+    for (let j = 0; j < recebimentosDaSf.length; j++) {
+      const recebimentoRaw = recebimentosDaSf[j];
+      const { itens: itensRecebimentoRaw, ...dadosRecebimento } = recebimentoRaw;
+      const itensDoRecebimento = Array.isArray(itensRecebimentoRaw) ? (itensRecebimentoRaw as Record<string, unknown>[]) : [];
+
+      const recebimentoCriado = await prisma.recebimento.create({
+        data: {
+          solicitacaoId: sfCriada.id,
+          ordem: j + 1,
+          dadosBrutos: dadosRecebimento as Prisma.InputJsonObject,
+        },
+      });
+
+      if (itensDoRecebimento.length) {
+        await prisma.itemRecebimento.createMany({
+          data: itensDoRecebimento.map((itemRaw, k) => ({
+            recebimentoId: recebimentoCriado.id,
+            ordem: k + 1,
+            dadosBrutos: itemRaw as Prisma.InputJsonObject,
+          })),
+        });
+      }
+    }
+  }
+
+  // Responsáveis do contrato (fiscal, gestor etc.) — endpoint confirmado ao
+  // vivo pelo usuário (2026-09-17): contratacoes/{id}/responsaveiscontratacao.
+  // Mesma regra dos demais sub-recursos: `ordem` reflete a posição recebida.
+  const responsaveis = Array.isArray(body.responsaveis) ? (body.responsaveis as Record<string, unknown>[]) : [];
+  if (responsaveis.length) {
+    await prisma.responsavelContrato.createMany({
+      data: responsaveis.map((raw, i) => ({
+        contratoId: contrato.id,
+        ordem: i + 1,
+        dadosBrutos: raw as Prisma.InputJsonObject,
+      })),
+    });
+  }
+
+  // Interações contábeis (empenhar/liquidar/pagar) — endpoint confirmado ao
+  // vivo pelo usuário (2026-09-17): contratacoes/{id}/interacaocontabil/
+  // integracao-filtros (ver browser-extension/src/background/service-worker.js).
+  // Mesma regra dos demais sub-recursos: `ordem` reflete a posição recebida.
+  const interacoesContabilidade = Array.isArray(body.interacoesContabilidade)
+    ? (body.interacoesContabilidade as Record<string, unknown>[])
+    : [];
+  if (interacoesContabilidade.length) {
+    await prisma.interacaoContabilidade.createMany({
+      data: interacoesContabilidade.map((raw, i) => ({
+        contratoId: contrato.id,
         ordem: i + 1,
         dadosBrutos: raw as Prisma.InputJsonObject,
       })),
@@ -222,6 +312,41 @@ function valorCelula(v: unknown): string | number {
   return JSON.stringify(v);
 }
 
+// Campo "organograma" (unidade orçamentária) — pedido do usuário: além da
+// descrição, mostrar também o código do organograma, que o fallback genérico
+// de valorCelula descarta (mostra só `descricao`, igual faz pra tipoAditivo
+// etc.). Restrito à chave "organograma" mesmo, não vale pra todo objeto que
+// tiver um `codigo` solto. Mesma lógica do lado da extensão de navegador
+// (browser-extension/src/shared/campos-relatorio.js).
+function ehChaveOrganograma(chave: string): boolean {
+  return /organograma/i.test(chave);
+}
+
+// Campo "solicitacaoFornecimento" de uma interação contábil — pedido do
+// usuário (2026-10-14): só interessa o número/ano formatado (`numeroAno`,
+// ex.: "4641/2025"), não o objeto inteiro que o Betha devolve. Mesma lógica
+// do lado da extensão (browser-extension/src/shared/campos-relatorio.js).
+function valorSolicitacaoFornecimento(valor: unknown): string {
+  const lista = Array.isArray(valor) ? valor : [valor];
+  return lista
+    .map((item) => (item != null && typeof item === 'object' ? (item as Record<string, unknown>).numeroAno : item))
+    .filter((v) => v != null)
+    .join(', ');
+}
+
+export function valorCelulaDinamica(chave: string, valor: unknown): string | number {
+  if (chave === 'solicitacaoFornecimento' && valor != null) {
+    return valorSolicitacaoFornecimento(valor);
+  }
+  if (ehChaveOrganograma(chave) && valor != null && typeof valor === 'object' && !Array.isArray(valor)) {
+    const obj = valor as Record<string, unknown>;
+    const descricao = obj.descricao != null ? String(obj.descricao) : '';
+    const codigo = obj.codigo != null ? String(obj.codigo) : '';
+    if (descricao && codigo) return `${descricao} (${codigo})`;
+  }
+  return valorCelula(valor);
+}
+
 function buscarContrato(id: string) {
   return prisma.contrato.findUnique({
     where: { id },
@@ -231,14 +356,55 @@ function buscarContrato(id: string) {
         orderBy: { ordem: 'asc' },
         include: { itens: { orderBy: { ordem: 'asc' } } },
       },
+      solicitacoesFornecimento: {
+        orderBy: { ordem: 'asc' },
+        include: {
+          recebimentos: {
+            orderBy: { ordem: 'asc' },
+            include: { itens: { orderBy: { ordem: 'asc' } } },
+          },
+        },
+      },
+      responsaveis: { orderBy: { ordem: 'asc' } },
+      interacoesContabilidade: { orderBy: { ordem: 'asc' } },
     },
   });
 }
 
-// Rótulo usado pra identificar de qual aditivo uma linha de item veio —
-// mesmo formato da coluna "Nº do aditivo" da aba Aditivos.
-function rotuloAditivo(aditivo: { ordem: number; sequencial: number | null }): string {
-  return aditivo.sequencial != null ? `${aditivo.ordem} (seq. ${aditivo.sequencial})` : String(aditivo.ordem);
+// Responsáveis do contrato (fiscal, gestor etc.) em seção/planilha própria —
+// pedido do usuário: nome, tipo e período de cada um, não misturados nos
+// campos do contrato. Formato confirmado ao vivo pelo usuário (2026-09-17)
+// contra o retorno real do sub-recurso `responsaveiscontratacao`: nome em
+// `responsavel.pessoa.nome`, tipo em `tipoResponsavelContrato.descricao`,
+// período em `dataInicioResponsabilidade`/`dataFinalResponsabilidade`.
+function extrairResponsavel(raw: Record<string, unknown>): { nome: string | null; tipo: string | null; periodo: string | null } {
+  const responsavel = (raw.responsavel ?? {}) as Record<string, unknown>;
+  const pessoa = (responsavel.pessoa ?? {}) as Record<string, unknown>;
+  const tipoResponsavelContrato = (raw.tipoResponsavelContrato ?? {}) as Record<string, unknown>;
+  const nome = (pessoa.nome as string | undefined) ?? (raw.nome as string | undefined) ?? null;
+  const tipo = (tipoResponsavelContrato.descricao as string | undefined) ?? null;
+  const periodo = formatarPeriodoResponsavel(
+    raw.dataInicioResponsabilidade as string | undefined,
+    raw.dataFinalResponsabilidade as string | undefined,
+  );
+  return { nome, tipo, periodo };
+}
+
+function formatarPeriodoResponsavel(inicioIso?: string, fimIso?: string): string | null {
+  const inicio = inicioIso ? formatarData(new Date(inicioIso)) : null;
+  const fim = fimIso ? formatarData(new Date(fimIso)) : null;
+  if (inicio && fim) return `${inicio} a ${fim}`;
+  if (inicio) return `A partir de ${inicio}`;
+  if (fim) return `Até ${fim}`;
+  return null;
+}
+
+// Formata chave camelCase pra rótulo legível (ex.: "tipoAditivo" -> "Tipo
+// Aditivo") — mesma lógica do lado da extensão de navegador
+// (browser-extension/src/shared/campos-relatorio.js), pra manter os dois
+// relatórios consistentes.
+export function formatarChave(chave: string): string {
+  return chave.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase());
 }
 
 // Colunas fixas do relatório de itens (pedido do usuário: só isso interessa,
@@ -250,6 +416,20 @@ function rotuloAditivo(aditivo: { ordem: number; sequencial: number | null }): s
 // existem aninhados num sub-objeto (confirmado ao vivo pelo usuário,
 // 2026-09-16, item do contrato em si, não de aditivo):
 // unidadeMedida.simbolo (ex.: "MES") e itemPropostaBO.valorUnitarioPercentual.
+// No item de ADITIVO, `unidadeMedida` vem como string pronta (ex.: "UN",
+// confirmado ao vivo pelo usuário, 2026-09-23), com o objeto completo só em
+// especificacao.unidadeMedida — por isso o extrator aceita os dois formatos.
+function extrairUnidade(raw: Record<string, unknown>): unknown {
+  const u = raw.unidadeMedida
+  if (typeof u === 'string' && u.trim()) return u.trim()
+  if (u && typeof u === 'object' && (u as Record<string, unknown>).simbolo) return (u as Record<string, unknown>).simbolo
+  const especificacao = raw.especificacao as Record<string, unknown> | undefined
+  const daEspecificacao = especificacao?.unidadeMedida
+  return daEspecificacao && typeof daEspecificacao === 'object'
+    ? (daEspecificacao as Record<string, unknown>).simbolo
+    : undefined
+}
+
 const CAMPOS_ITEM: Array<{ header: string; key: string; chaves: string[]; extrair?: (raw: Record<string, unknown>) => unknown; moeda?: boolean }> = [
   { header: 'Nº do item', key: 'numero', chaves: ['numero', 'numeroItem', 'item', 'ordem'] },
   { header: 'Descrição', key: 'descricao', chaves: ['material', 'especificacao', 'descricaoItem', 'descricao'] },
@@ -257,17 +437,21 @@ const CAMPOS_ITEM: Array<{ header: string; key: string; chaves: string[]; extrai
     header: 'Unidade',
     key: 'unidade',
     chaves: ['unidade', 'unidade_medida', 'undMedida'],
-    extrair: (raw) => (raw.unidadeMedida as Record<string, unknown> | undefined)?.simbolo,
+    extrair: extrairUnidade,
   },
   { header: 'Quantidade', key: 'quantidade', chaves: ['qtdItem', 'quantidade', 'qtde', 'qtd'] },
   {
     header: 'Valor unitário (R$)',
     key: 'valorUnitario',
-    chaves: ['valorItem', 'valorUnitario', 'valorUnit', 'precoUnitario'],
+    // `vlUnitario` confirmado ao vivo pelo usuário (2026-09-17, item de
+    // recebimento) — chave própria desse sub-recurso, diferente das demais.
+    chaves: ['valorItem', 'valorUnitario', 'valorUnit', 'precoUnitario', 'vlUnitario'],
     extrair: (raw) => (raw.itemPropostaBO as Record<string, unknown> | undefined)?.valorUnitarioPercentual,
     moeda: true,
   },
-  { header: 'Valor total (R$)', key: 'valorTotal', chaves: ['valorTotal', 'valor'], moeda: true },
+  // `vlTotal` confirmado ao vivo pelo usuário (2026-09-17, item de
+  // recebimento) — chave própria desse sub-recurso, diferente das demais.
+  { header: 'Valor total (R$)', key: 'valorTotal', chaves: ['valorTotal', 'valor', 'vlTotal'], moeda: true },
 ];
 
 function extrairCampoItem(raw: Record<string, unknown>, campo: { chaves: string[]; extrair?: (raw: Record<string, unknown>) => unknown }): unknown {
@@ -281,12 +465,10 @@ function extrairCampoItem(raw: Record<string, unknown>, campo: { chaves: string[
   return undefined;
 }
 
-// Mesma ideia de preencherPlanilhaDinamica, mas com as colunas FIXAS de
-// CAMPOS_ITEM em vez da união de todas as chaves — usado pras duas abas de
-// itens (do contrato e de aditivos). `colunaFixa` é opcional — só faz
-// sentido pra identificar de qual aditivo cada item veio (Itens dos
-// Aditivos); Itens do Contrato não precisa, já que "Nº do item" já vem do
-// próprio CAMPOS_ITEM (colunaFixa duplicaria essa coluna).
+// Preenche a aba "Itens" (do contrato ou de um aditivo) com as colunas FIXAS
+// de CAMPOS_ITEM — não colunas dinâmicas, já que o catálogo de itens em si é
+// conhecido. `colunaFixa` existe pra um eventual identificador extra no
+// futuro; hoje as duas chamadas passam `null`.
 function preencherPlanilhaItens(
   planilha: ExcelJS.Worksheet,
   colunaFixa: { header: string; key: string; width: number } | null,
@@ -308,61 +490,60 @@ function preencherPlanilhaItens(
   }
 }
 
-// Gera colunas dinâmicas (união das chaves de todos os registros) + preenche
-// uma planilha — usado pra Aditivos (catálogo de campos não confirmado ao
-// vivo, mostramos tudo que vier).
-function preencherPlanilhaDinamica(
-  planilha: ExcelJS.Worksheet,
-  colunaFixa: { header: string; key: string; width: number },
-  linhas: Array<{ __fixo: string; raw: Record<string, unknown> }>,
-) {
-  const colunas: string[] = [];
-  const vistas = new Set<string>();
-  for (const linha of linhas) {
-    if (linha.raw && typeof linha.raw === 'object') {
-      for (const chave of Object.keys(linha.raw)) {
-        if (!vistas.has(chave)) {
-          vistas.add(chave);
-          colunas.push(chave);
-        }
-      }
-    }
-  }
-
-  planilha.columns = [colunaFixa, ...colunas.map((chave) => ({ header: chave, key: chave, width: 24 }))];
-  planilha.getRow(1).font = { bold: true };
-
-  for (const linha of linhas) {
-    const registro: Record<string, unknown> = { [colunaFixa.key]: linha.__fixo };
-    for (const chave of colunas) {
-      registro[chave] = valorCelula(linha.raw[chave]);
-    }
-    planilha.addRow(registro);
-  }
-}
-
-contratosRouter.get('/:id/relatorio', async (req, res) => {
-  const contrato = await buscarContrato(req.params.id);
-  if (!contrato) {
-    res.status(404).json({ error: 'Contrato não encontrado' });
-    return;
-  }
-
-  const workbook = new ExcelJS.Workbook();
-  const planilha = workbook.addWorksheet('Contrato');
+// Planilha campo/valor (2 colunas) — mesmo formato usado pra aba "Contrato"
+// (CAMPOS_RELATORIO), agora reaproveitado pros documentos de aditivo e de
+// solicitação de fornecimento também.
+function preencherPlanilhaCampos(planilha: ExcelJS.Worksheet, linhas: Array<{ campo: string; valor: string | number | null }>) {
   planilha.columns = [
     { header: 'Campo', key: 'campo', width: 36 },
     { header: 'Valor', key: 'valor', width: 48 },
   ];
   planilha.getRow(1).font = { bold: true };
 
-  for (const campo of CAMPOS_RELATORIO) {
-    planilha.addRow({ campo: campo.label, valor: campo.valor(contrato) ?? '' });
+  for (const linha of linhas) {
+    planilha.addRow({ campo: linha.campo, valor: linha.valor ?? '' });
   }
+}
 
-  // Itens do contrato — abaixo dos dados do contrato num sentido lógico
-  // (aba própria, já que Excel não empilha tabelas de tamanhos diferentes
-  // na mesma planilha de forma legível).
+// Mesma planilha campo/valor, mas a partir do JSON cru de um aditivo/
+// solicitação de fornecimento — catálogo de campos desses sub-recursos não
+// confirmado ao vivo, então mostramos tudo que vier (mesmo motivo de
+// dadosBrutos no schema.prisma).
+export function preencherPlanilhaCamposDinamicos(planilha: ExcelJS.Worksheet, raw: Record<string, unknown>) {
+  preencherPlanilhaCampos(
+    planilha,
+    Object.entries(raw).map(([chave, valor]) => ({ campo: formatarChave(chave), valor: valorCelulaDinamica(chave, valor) })),
+  );
+}
+
+// Planilha com nome, tipo (fiscal/gestor) e período de vigência de cada
+// responsável — ver extrairResponsavel acima.
+function preencherPlanilhaResponsaveis(planilha: ExcelJS.Worksheet, responsaveis: Array<{ dadosBrutos: unknown }>) {
+  planilha.columns = [
+    { header: 'Responsável', key: 'responsavel', width: 36 },
+    { header: 'Tipo', key: 'tipo', width: 20 },
+    { header: 'Período', key: 'periodo', width: 28 },
+  ];
+  planilha.getRow(1).font = { bold: true };
+
+  for (const { dadosBrutos } of responsaveis) {
+    const { nome, tipo, periodo } = extrairResponsavel((dadosBrutos ?? {}) as Record<string, unknown>);
+    planilha.addRow({ responsavel: nome ?? '', tipo: tipo ?? '', periodo: periodo ?? '' });
+  }
+}
+
+// Um workbook por documento (contrato / aditivo / solicitação de
+// fornecimento) — pedido do usuário: relatórios separados por documento, não
+// um único arquivo juntando tudo (mesmo princípio do relatório em PDF da
+// extensão, ver browser-extension/src/shared/pdf-relatorio.js).
+function workbookContrato(contrato: NonNullable<Awaited<ReturnType<typeof buscarContrato>>>): ExcelJS.Workbook {
+  const workbook = new ExcelJS.Workbook();
+  const planilha = workbook.addWorksheet('Contrato');
+  preencherPlanilhaCampos(
+    planilha,
+    CAMPOS_RELATORIO.map((campo) => ({ campo: campo.label, valor: campo.valor(contrato) })),
+  );
+
   if (contrato.itens.length > 0) {
     const planilhaItens = workbook.addWorksheet('Itens do Contrato');
     preencherPlanilhaItens(
@@ -372,36 +553,193 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
     );
   }
 
-  // Cada aditivo vira uma LINHA própria numa aba separada — sempre
-  // identificado pelo nº de ordem (+ o sequencial do próprio aditivo, quando
-  // existir), pra nunca misturar os dados de aditivos diferentes na mesma
-  // célula. Colunas são geradas dinamicamente a partir do que cada aditivo
-  // realmente trouxe (o catálogo de campos desse sub-recurso do Betha ainda
-  // não foi confirmado ao vivo — ver mapearContrato acima).
-  if (contrato.aditivos.length > 0) {
-    const planilhaAditivos = workbook.addWorksheet('Aditivos');
-    preencherPlanilhaDinamica(
-      planilhaAditivos,
-      { header: 'Nº do aditivo', key: '__numero', width: 18 },
-      contrato.aditivos.map((aditivo) => ({ __fixo: rotuloAditivo(aditivo), raw: aditivo.dadosBrutos as Record<string, unknown> })),
+  if (contrato.responsaveis.length > 0) {
+    const planilhaResponsaveis = workbook.addWorksheet('Responsáveis');
+    preencherPlanilhaResponsaveis(planilhaResponsaveis, contrato.responsaveis);
+  }
+
+  return workbook;
+}
+
+function workbookAditivo(aditivo: NonNullable<Awaited<ReturnType<typeof buscarContrato>>>['aditivos'][number]): ExcelJS.Workbook {
+  const workbook = new ExcelJS.Workbook();
+  const planilha = workbook.addWorksheet('Aditivo');
+  preencherPlanilhaCamposDinamicos(planilha, aditivo.dadosBrutos as Record<string, unknown>);
+
+  if (aditivo.itens.length > 0) {
+    const planilhaItens = workbook.addWorksheet('Itens');
+    preencherPlanilhaItens(
+      planilhaItens,
+      null,
+      aditivo.itens.map((item) => ({ __fixo: String(item.ordem), raw: item.dadosBrutos as Record<string, unknown> })),
     );
   }
 
-  // Itens vinculados a aditivos — uma aba própria, com a primeira coluna
-  // dizendo de qual aditivo cada item veio (mesmo rótulo da aba Aditivos).
-  // Aditivos sem nenhum item simplesmente não aparecem aqui (normal numa
-  // planilha); a ausência é explícita no relatório em PDF da extensão.
-  const itensDeAditivos = contrato.aditivos.flatMap((aditivo) =>
-    aditivo.itens.map((item) => ({ __fixo: rotuloAditivo(aditivo), raw: item.dadosBrutos as Record<string, unknown> })),
+  return workbook;
+}
+
+function workbookSolicitacaoFornecimento(
+  solicitacao: NonNullable<Awaited<ReturnType<typeof buscarContrato>>>['solicitacoesFornecimento'][number],
+): ExcelJS.Workbook {
+  const workbook = new ExcelJS.Workbook();
+  const planilha = workbook.addWorksheet('Solicitação de Fornecimento');
+  preencherPlanilhaCamposDinamicos(planilha, solicitacao.dadosBrutos as Record<string, unknown>);
+  return workbook;
+}
+
+function workbookInteracaoContabilidade(
+  interacao: NonNullable<Awaited<ReturnType<typeof buscarContrato>>>['interacoesContabilidade'][number],
+): ExcelJS.Workbook {
+  const workbook = new ExcelJS.Workbook();
+  const planilha = workbook.addWorksheet('Interação Contábil');
+  const raw = interacao.dadosBrutos as Record<string, unknown>;
+  // `contratacao` vira "Sequencial da contratação" — só o sequencial (injetado
+  // pela extensão, ver enriquecerSequenciaisContratacao em popup.js), não o
+  // objeto cru com flags/id interno que o Betha devolve.
+  preencherPlanilhaCampos(
+    planilha,
+    Object.entries(raw).map(([chave, valor]) => {
+      if (chave === 'contratacao') {
+        const sequencial =
+          valor != null && typeof valor === 'object' ? (valor as Record<string, unknown>).sequencial : null;
+        return { campo: 'Sequencial da contratação', valor: sequencial != null ? String(sequencial) : '' };
+      }
+      return { campo: formatarChave(chave), valor: valorCelulaDinamica(chave, valor) };
+    }),
   );
-  if (itensDeAditivos.length > 0) {
-    const planilhaItensAditivos = workbook.addWorksheet('Itens dos Aditivos');
-    preencherPlanilhaItens(planilhaItensAditivos, { header: 'Nº do aditivo', key: '__numero', width: 18 }, itensDeAditivos);
+  return workbook;
+}
+
+// Documento próprio com os recebimentos de UMA solicitação de fornecimento —
+// separado do workbook da solicitação em si (pedido do usuário, 2026-09-17:
+// "deixe os recebimentos separados em uma aba específica"). CADA recebimento
+// vira sua PRÓPRIA aba (worksheet) dentro deste workbook, com todos os
+// campos que a API devolveu — não colunas fixas: a tela "Editando
+// recebimento" do Betha tem bem mais informação que a listagem (desconto,
+// retenção tributária, provisório, observações, comprovantes), e um recorte
+// fixo perderia esses campos quando vierem preenchidos. Quando o recebimento
+// tem itens (o que efetivamente foi recebido do catálogo — pedido do
+// usuário, 2026-09-17), ganha mais uma aba própria "Recebimento N - Itens",
+// mesmo princípio de workbookAditivo (aba "Aditivo" + aba "Itens"). Nome de
+// aba truncado em 31 caracteres (limite do Excel para nome de worksheet).
+function workbookRecebimentos(
+  solicitacao: NonNullable<Awaited<ReturnType<typeof buscarContrato>>>['solicitacoesFornecimento'][number],
+): ExcelJS.Workbook {
+  const workbook = new ExcelJS.Workbook();
+  solicitacao.recebimentos.forEach((recebimento, index) => {
+    const raw = (recebimento.dadosBrutos ?? {}) as Record<string, unknown>;
+    const numero = raw.numero != null ? String(raw.numero) : String(index + 1);
+    const planilha = workbook.addWorksheet(`Recebimento ${numero}`.slice(0, 31));
+    preencherPlanilhaCamposDinamicos(planilha, raw);
+
+    if (recebimento.itens.length > 0) {
+      const planilhaItens = workbook.addWorksheet(`Recebimento ${numero} - Itens`.slice(0, 31));
+      preencherPlanilhaItens(
+        planilhaItens,
+        null,
+        recebimento.itens.map((item) => ({ __fixo: String(item.ordem), raw: item.dadosBrutos as Record<string, unknown> })),
+      );
+    }
+  });
+  return workbook;
+}
+
+// Descrição de cada documento gerado (contrato/aditivo/solicitação) —
+// pedido do usuário: "contrato 12/2026", "aditivo 1", "solicitação de
+// fornecimento 197/2026" (sem a palavra "relatório"). Usada como nome do
+// arquivo dentro do zip — mesmo padrão do PDF gerado pela extensão (ver
+// browser-extension/src/shared/campos-relatorio.js).
+function tituloContrato(contrato: { numeroFormatado: string | null; sequencial: number }): string {
+  const numero = contrato.numeroFormatado ?? `seq. ${contrato.sequencial}`;
+  return `contrato ${numero}`;
+}
+
+function tituloAditivo(aditivo: { sequencial: number | null; ordem: number }): string {
+  return `aditivo ${aditivo.sequencial ?? aditivo.ordem}`;
+}
+
+function tituloSolicitacaoFornecimento(solicitacao: { ordem: number; dadosBrutos: unknown }): string {
+  const raw = (solicitacao.dadosBrutos ?? {}) as Record<string, unknown>;
+  const numero = (raw.numeroAno as string | undefined) ?? (raw.numero != null ? String(raw.numero) : undefined);
+  return `solicitação de fornecimento ${numero ?? solicitacao.ordem}`;
+}
+
+// Sem um "número/ano" formatado como o de solicitação de fornecimento — usa
+// `sequencial` (posição da interação dentro do contrato) + o tipo de ação
+// (Empenhar/Liquidar/Pagar) pra identificar cada uma, mesma lógica do lado
+// da extensão de navegador (browser-extension/src/shared/campos-relatorio.js).
+function tituloInteracaoContabilidade(interacao: { ordem: number; dadosBrutos: unknown }): string {
+  const raw = (interacao.dadosBrutos ?? {}) as Record<string, unknown>;
+  const identificador = raw.sequencial != null ? String(raw.sequencial) : String(interacao.ordem);
+  const tipoAcao = (raw.tipoAcaoDesc as string | undefined) ?? (raw.tipoAcao as string | undefined);
+  return `interação contábil ${identificador}${tipoAcao ? ` (${tipoAcao})` : ''}`;
+}
+
+function tituloRecebimentos(solicitacao: { ordem: number; dadosBrutos: unknown }): string {
+  return `recebimentos da ${tituloSolicitacaoFornecimento(solicitacao)}`;
+}
+
+// Nome de arquivo a partir da descrição do documento (ex.: "aditivo 1" ->
+// "aditivo-1") — sem acento, minúsculo, só letras/números separados por
+// hífen.
+export function slug(texto: string): string {
+  return texto
+    .normalize('NFD')
+    .replace(/\p{Mn}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+}
+
+// exceljs declara um `Buffer` próprio no seu .d.ts (interface local mínima,
+// `extends ArrayBuffer` — suporte a browser, onde não existe o Buffer do
+// Node), sem relação com o Buffer real do Node que `writeBuffer()` devolve
+// em runtime. Isola o cast num só lugar em vez de repetir `as unknown as
+// Buffer` a cada chamada.
+export async function workbookParaBuffer(workbook: ExcelJS.Workbook): Promise<Buffer> {
+  return (await workbook.xlsx.writeBuffer()) as unknown as Buffer;
+}
+
+contratosRouter.get('/:id/relatorio', async (req, res) => {
+  const contrato = await buscarContrato(req.params.id);
+  if (!contrato) {
+    res.status(404).json({ error: 'Contrato não encontrado' });
+    return;
   }
 
-  const nomeArquivo = `contrato-${contrato.numeroFormatado ?? contrato.sequencial}.xlsx`;
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}"`);
-  await workbook.xlsx.write(res);
-  res.end();
+  const nomeContrato = slug(tituloContrato(contrato));
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="${nomeContrato}.zip"`);
+
+  const arquivoZip = archiver('zip', { zlib: { level: 9 } });
+  // Erro no meio da escrita do zip (ex.: stream do cliente fechada) não pode
+  // virar exceção não tratada — derruba a resposta em vez de crashar o
+  // processo (padrão recomendado pelo archiver para servidores long-running).
+  arquivoZip.on('error', (err) => res.destroy(err));
+  arquivoZip.pipe(res);
+
+  arquivoZip.append(await workbookParaBuffer(workbookContrato(contrato)), { name: `${nomeContrato}.xlsx` });
+
+  for (const aditivo of contrato.aditivos) {
+    const buffer = await workbookParaBuffer(workbookAditivo(aditivo));
+    arquivoZip.append(buffer, { name: `${slug(tituloAditivo(aditivo))}.xlsx` });
+  }
+
+  for (const solicitacao of contrato.solicitacoesFornecimento) {
+    const buffer = await workbookParaBuffer(workbookSolicitacaoFornecimento(solicitacao));
+    arquivoZip.append(buffer, { name: `${slug(tituloSolicitacaoFornecimento(solicitacao))}.xlsx` });
+  }
+
+  for (const interacao of contrato.interacoesContabilidade) {
+    const buffer = await workbookParaBuffer(workbookInteracaoContabilidade(interacao));
+    arquivoZip.append(buffer, { name: `${slug(tituloInteracaoContabilidade(interacao))}.xlsx` });
+  }
+
+  for (const solicitacao of contrato.solicitacoesFornecimento) {
+    if (solicitacao.recebimentos.length === 0) continue;
+    const buffer = await workbookParaBuffer(workbookRecebimentos(solicitacao));
+    arquivoZip.append(buffer, { name: `${slug(tituloRecebimentos(solicitacao))}.xlsx` });
+  }
+
+  await arquivoZip.finalize();
 });

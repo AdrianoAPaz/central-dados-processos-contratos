@@ -2,10 +2,22 @@
 // (pré-visualização, se um dia precisar) e a página de relatório/PDF.
 // Mesmo conjunto de campos do relatório em Excel gerado pela Central de Dados
 // (backend/src/routes/contratos.ts), pra manter os dois relatórios consistentes.
+function formatarNumeroContrato(c) {
+  if (c.numeroTermo != null) return c.ano ? `${c.numeroTermo}/${c.ano}` : String(c.numeroTermo)
+  if (c.sequencial != null) return `Seq. ${c.sequencial}`
+  return ''
+}
+
+// Descrição do documento do contrato — pedido do usuário: "contrato 12/2026"
+// pro contrato de número de termo 12, ano 2026 (sem a palavra "relatório").
+// Usada como título dentro do PDF e como base do nome do arquivo.
+export function tituloContrato(c) {
+  const numero = formatarNumeroContrato(c)
+  return numero ? `contrato ${numero}` : 'contrato'
+}
+
 export function montarCamposRelatorio(c) {
-  const numero = c.numeroTermo != null
-    ? (c.ano ? `${c.numeroTermo}/${c.ano}` : String(c.numeroTermo))
-    : (c.sequencial != null ? `Seq. ${c.sequencial}` : '')
+  const numero = formatarNumeroContrato(c)
   const tipoInstrumento = c.tipoInstrumento || {}
   const fornecedorPessoa = (c.fornecedor && c.fornecedor.pessoa) || {}
   const entidade = c.entidade || {}
@@ -42,22 +54,37 @@ export function montarCamposRelatorio(c) {
 // existem aninhados num sub-objeto (confirmado ao vivo pelo usuário,
 // 2026-09-16, item do contrato em si, não de aditivo):
 // unidadeMedida.simbolo (ex.: "MES") e itemPropostaBO.valorUnitarioPercentual.
+// No item de ADITIVO, `unidadeMedida` vem como string pronta (ex.: "UN",
+// confirmado ao vivo pelo usuário, 2026-09-23), com o objeto completo só em
+// especificacao.unidadeMedida — por isso o extrator aceita os dois formatos.
+function extrairUnidade(raw) {
+  const u = raw.unidadeMedida
+  if (typeof u === 'string' && u.trim()) return u.trim()
+  if (u && typeof u === 'object' && u.simbolo) return u.simbolo
+  const daEspecificacao = raw.especificacao && raw.especificacao.unidadeMedida
+  return daEspecificacao && typeof daEspecificacao === 'object' ? daEspecificacao.simbolo : undefined
+}
+
 const CAMPOS_ITEM = [
   { header: 'Nº do item', chaves: ['numero', 'numeroItem', 'item', 'ordem'] },
   { header: 'Descrição', chaves: ['material', 'especificacao', 'descricaoItem', 'descricao'] },
   {
     header: 'Unidade',
     chaves: ['unidade', 'unidade_medida', 'undMedida'],
-    extrair: (raw) => raw.unidadeMedida && raw.unidadeMedida.simbolo,
+    extrair: extrairUnidade,
   },
   { header: 'Quantidade', chaves: ['qtdItem', 'quantidade', 'qtde', 'qtd'] },
   {
     header: 'Valor unitário (R$)',
-    chaves: ['valorItem', 'valorUnitario', 'valorUnit', 'precoUnitario'],
+    // `vlUnitario` confirmado ao vivo pelo usuário (2026-09-17, item de
+    // recebimento) — chave própria desse sub-recurso, diferente das demais.
+    chaves: ['valorItem', 'valorUnitario', 'valorUnit', 'precoUnitario', 'vlUnitario'],
     extrair: (raw) => raw.itemPropostaBO && raw.itemPropostaBO.valorUnitarioPercentual,
     moeda: true,
   },
-  { header: 'Valor total (R$)', chaves: ['valorTotal', 'valor'], moeda: true },
+  // `vlTotal` confirmado ao vivo pelo usuário (2026-09-17, item de
+  // recebimento) — chave própria desse sub-recurso, diferente das demais.
+  { header: 'Valor total (R$)', chaves: ['valorTotal', 'valor', 'vlTotal'], moeda: true },
 ]
 
 function extrairCampoItem(raw, campo) {
@@ -112,10 +139,14 @@ export function montarSecoesAditivos(aditivos) {
   return ordenados.map((raw, index) => {
     const identificador = extrairIdentificadorAditivo(raw)
     const numero = index + 1
-    const titulo = identificador != null ? `Aditivo ${numero} (seq. ${identificador})` : `Aditivo ${numero}`
+    // Descrição do documento — pedido do usuário: "aditivo 1" pro aditivo de
+    // número sequencial 1 (sem a palavra "relatório"). Usa o sequencial do
+    // próprio aditivo quando existir; cai pra posição cronológica só quando
+    // o Betha não trouxe nenhum identificador próprio.
+    const titulo = `aditivo ${identificador ?? numero}`
 
     const { itens, ...demaisCampos } = raw || {}
-    const campos = Object.entries(demaisCampos).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorTexto(valor) }))
+    const campos = Object.entries(demaisCampos).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor) }))
     const tabelaItens = montarTabelaItens(itens)
 
     return { numero, titulo, campos, tabelaItens }
@@ -134,10 +165,124 @@ export function montarSecoesSolicitacoesFornecimento(solicitacoes) {
 
   return solicitacoes.map((raw, index) => {
     const numero = (raw && (raw.numeroAno || (raw.numero != null ? String(raw.numero) : null))) || null
-    const titulo = numero ? `Solicitação de fornecimento ${numero}` : `Solicitação de fornecimento ${index + 1}`
-    const campos = Object.entries(raw || {}).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorTexto(valor) }))
+    // Descrição do documento — pedido do usuário: "solicitação de
+    // fornecimento 197/2026" pra solicitação 197 de 2026 (sem a palavra
+    // "relatório").
+    const titulo = `solicitação de fornecimento ${numero ?? index + 1}`
+    const campos = Object.entries(raw || {}).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor) }))
     return { titulo, campos }
   })
+}
+
+// Cada interação contábil (empenhar/liquidar/pagar) vinculada ao contrato
+// vira uma SEÇÃO própria — mesmo estilo das solicitações de fornecimento:
+// mostra TODOS os campos que a API devolve, sem recorte pra um subconjunto
+// fixo (o `desdobramento` interno já vem com o essencial de cada rateio
+// orçamentário e é exibido por completo via valorTexto). Não há um
+// "número/ano" formatado como o de solicitação de fornecimento — usa
+// `sequencial` (posição da interação dentro do contrato) + o tipo de ação
+// (Empenhar/Liquidar/Pagar) pra identificar cada uma no título.
+export function montarSecoesInteracoesContabilidade(interacoes) {
+  if (!Array.isArray(interacoes) || !interacoes.length) return []
+
+  return interacoes.map((raw, index) => {
+    const identificador = (raw && raw.sequencial) ?? index + 1
+    const tipoAcao = raw && (raw.tipoAcaoDesc || raw.tipoAcao)
+    const titulo = `interação contábil ${identificador}${tipoAcao ? ` (${tipoAcao})` : ''}`
+    const campos = []
+    for (const [chave, valor] of Object.entries(raw || {})) {
+      // `contratacao` vira "Sequencial da contratação" — só o sequencial
+      // (injetado por popup.js, ver enriquecerSequenciaisContratacao), não o
+      // objeto cru com flags/id interno que o Betha devolve.
+      if (chave === 'contratacao') {
+        campos.push({
+          label: 'Sequencial da contratação',
+          valor: valor && typeof valor === 'object' && valor.sequencial != null ? String(valor.sequencial) : '',
+        })
+        continue
+      }
+      campos.push({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor) })
+      // Campo extra "Despesa" logo após "Desdobramento" — pedido do usuário
+      // (2026-09-22): o número da despesa (ex.: 291), não o id interno
+      // (`despesa.id`) que já aparece dentro de cada rateio. Não é uma chave
+      // própria do retorno da Betha; é sintetizado aqui a partir de
+      // `despesa.numero` que popup.js injeta em cada item de
+      // `desdobramento` (ver enriquecerNumerosDespesa).
+      if (chave === 'desdobramento') {
+        campos.push({ label: 'Despesa', valor: valorNumeroDespesa(valor) })
+      }
+    }
+    return { titulo, campos }
+  })
+}
+
+// Campos de UM recebimento — TODOS os que a API devolver, sem recorte pra um
+// subconjunto fixo. Pedido do usuário (2026-09-17): a tela "Editando
+// recebimento" do Betha mostra bem mais do que as colunas da listagem
+// (desconto, retenção tributária, provisório e datas, observações,
+// comprovantes com nota fiscal/saldo/valor) — um recorte fixo perderia
+// qualquer um desses campos que a listagem eventualmente trouxer. Mesmo
+// estilo de montarSecoesSolicitacoesFornecimento: `comprovantes`/`arquivos`
+// (arrays de objetos) já caem no fallback genérico de valorTexto. `itens` é
+// excluído daqui — vira tabela própria (ver montarTabelaItens), não faz
+// sentido como um campo de texto genérico.
+function montarCamposRecebimento(raw) {
+  const { itens: _itens, ...demaisCampos } = raw || {}
+  return Object.entries(demaisCampos).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor) }))
+}
+
+// Recebimentos vinculados a CADA solicitação de fornecimento viram uma
+// seção própria numa aba específica de "Recebimentos" — pedido do usuário
+// (2026-09-17): separados da seção de solicitações de fornecimento, mas
+// identificando a qual solicitação cada grupo pertence. Dentro da seção,
+// cada recebimento é seu próprio bloco com todos os campos (ver
+// montarCamposRecebimento) e, logo abaixo, os itens efetivamente recebidos
+// (mesma tabela de colunas fixas dos itens de contrato/aditivo — pedido do
+// usuário, 2026-09-17). Só gera seção pra solicitação que efetivamente tem
+// recebimento.
+export function montarSecoesRecebimentos(solicitacoes) {
+  if (!Array.isArray(solicitacoes) || !solicitacoes.length) return []
+
+  return solicitacoes
+    .filter((sf) => Array.isArray(sf && sf.recebimentos) && sf.recebimentos.length)
+    .map((sf) => {
+      const numero = (sf.numeroAno || (sf.numero != null ? String(sf.numero) : null)) ?? sf.id
+      const titulo = `recebimentos da solicitação de fornecimento ${numero}`
+      const recebimentos = sf.recebimentos.map((raw, index) => ({
+        titulo: `recebimento ${(raw && raw.numero) ?? index + 1}`,
+        campos: montarCamposRecebimento(raw),
+        tabelaItens: montarTabelaItens(raw && raw.itens),
+      }))
+      return { titulo, recebimentos }
+    })
+}
+
+// Responsáveis do contrato (fiscal, gestor etc.) em seção própria — pedido
+// do usuário: nome, tipo e período de cada um, não misturados nos campos do
+// contrato. Formato confirmado ao vivo pelo usuário (2026-09-17) contra o
+// retorno real do sub-recurso `responsaveiscontratacao`: nome em
+// `responsavel.pessoa.nome`, tipo em `tipoResponsavelContrato.descricao`,
+// período em `dataInicioResponsabilidade`/`dataFinalResponsabilidade`.
+export function montarTabelaResponsaveis(responsaveis) {
+  if (!Array.isArray(responsaveis) || !responsaveis.length) return { colunas: [], linhas: [] }
+  return {
+    colunas: ['Responsável', 'Tipo', 'Período'],
+    linhas: responsaveis.map((r) => {
+      const pessoa = (r && r.responsavel && r.responsavel.pessoa) || {}
+      const tipo = (r && r.tipoResponsavelContrato && r.tipoResponsavelContrato.descricao) || ''
+      const periodo = formatarPeriodo(r && r.dataInicioResponsabilidade, r && r.dataFinalResponsabilidade)
+      return [pessoa.nome || '', tipo, periodo]
+    }),
+  }
+}
+
+function formatarPeriodo(inicio, fim) {
+  const dataInicio = formatarData(inicio)
+  const dataFim = formatarData(fim)
+  if (dataInicio && dataFim) return `${dataInicio} a ${dataFim}`
+  if (dataInicio) return `A partir de ${dataInicio}`
+  if (dataFim) return `Até ${dataFim}`
+  return ''
 }
 
 function formatarChave(chave) {
@@ -176,9 +321,86 @@ function valorTexto(v) {
     if (v.numeroTermo != null) return v.ano != null ? `${v.numeroTermo}/${v.ano}` : String(v.numeroTermo)
     if (v.descricao != null) return String(v.descricao)
     if (v.nome != null) return String(v.nome)
+    // Fornecedor/responsável do Betha: o nome fica em `pessoa.nome` (ex.:
+    // fornecedor da solicitação de fornecimento, pedido do usuário,
+    // 2026-10-14) — sem isso cai no JSON.stringify do objeto inteiro.
+    if (v.pessoa && typeof v.pessoa === 'object' && v.pessoa.nome != null) return String(v.pessoa.nome)
     return JSON.stringify(v)
   }
   return String(v)
+}
+
+// Campo "organograma" (unidade orçamentária) — pedido do usuário: além da
+// descrição, mostrar também o código do organograma, que o fallback genérico
+// de valorTexto descarta (mostra só `descricao`, igual faz pra tipoAditivo
+// etc.). Restrito à chave "organograma" mesmo — não vale pra todo objeto que
+// tiver um `codigo` solto, só pra esse campo específico.
+function ehChaveOrganograma(chave) {
+  return typeof chave === 'string' && /organograma/i.test(chave)
+}
+
+// Campo "desdobramento" de uma interação contábil (empenhar/liquidar/pagar) —
+// pedido do usuário (2026-09-22): o Betha devolve, pra cada rateio
+// orçamentário, um OBJETO cheio de metadados (empenho, natureza de despesa,
+// arquivos...) e não só o número do desdobramento em si (ex.:
+// "33903900000000"). O fallback genérico de valorTexto cai no
+// JSON.stringify(v) desse objeto por não reconhecer nenhuma chave conhecida
+// (numeroTermo/descricao/nome) — mostra o campo ilegível no relatório. Aqui
+// extrai só `item.desdobramento` de cada rateio (pode vir mais de um, por
+// isso o array), unindo por vírgula igual ao restante do relatório.
+function ehChaveDesdobramento(chave) {
+  return chave === 'desdobramento'
+}
+
+function valorDesdobramento(valor) {
+  const lista = Array.isArray(valor) ? valor : [valor]
+  return lista
+    .map((item) => (item && typeof item === 'object' ? item.desdobramento : item))
+    .filter((v) => v != null)
+    .join(', ')
+}
+
+// Número da despesa (ex.: "291") de cada rateio — `despesa.numero` só existe
+// quando popup.js já enriqueceu o item (ver enriquecerNumerosDespesa); sem
+// isso o campo simplesmente fica em branco no relatório, nunca mostra o id
+// interno (`despesa.id`) no lugar por engano.
+function valorNumeroDespesa(valor) {
+  const lista = Array.isArray(valor) ? valor : [valor]
+  return lista
+    .map((item) => (item && typeof item === 'object' && item.despesa ? item.despesa.numero : null))
+    .filter((v) => v != null)
+    .join(', ')
+}
+
+// Campo "solicitacaoFornecimento" de uma interação contábil — pedido do
+// usuário (2026-10-14): o Betha devolve o objeto inteiro da solicitação, mas
+// só interessa o número/ano formatado (`numeroAno`, ex.: "4641/2025"). Sem
+// isso o fallback genérico de valorTexto cai no JSON.stringify do objeto.
+function ehChaveSolicitacaoFornecimento(chave) {
+  return chave === 'solicitacaoFornecimento'
+}
+
+function valorSolicitacaoFornecimento(valor) {
+  const lista = Array.isArray(valor) ? valor : [valor]
+  return lista
+    .map((item) => (item && typeof item === 'object' ? item.numeroAno : item))
+    .filter((v) => v != null)
+    .join(', ')
+}
+
+function valorCampoDinamico(chave, valor) {
+  if (ehChaveSolicitacaoFornecimento(chave) && valor != null) {
+    return valorSolicitacaoFornecimento(valor)
+  }
+  if (ehChaveOrganograma(chave) && valor && typeof valor === 'object' && !Array.isArray(valor)) {
+    const descricao = valor.descricao != null ? String(valor.descricao) : ''
+    const codigo = valor.codigo != null ? String(valor.codigo) : ''
+    if (descricao && codigo) return `${descricao} (${codigo})`
+  }
+  if (ehChaveDesdobramento(chave) && valor != null) {
+    return valorDesdobramento(valor)
+  }
+  return valorTexto(valor)
 }
 
 function formatarData(iso) {

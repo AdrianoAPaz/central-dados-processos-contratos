@@ -2,10 +2,13 @@ import {
   montarCamposRelatorio,
   montarSecoesAditivos,
   montarTabelaItens,
+  montarTabelaResponsaveis,
   montarSecoesSolicitacoesFornecimento,
+  montarSecoesInteracoesContabilidade,
+  montarSecoesRecebimentos,
 } from '../shared/campos-relatorio.js'
 import { criarZip } from '../shared/zip.js'
-import { gerarPdfRelatorio } from '../shared/pdf-relatorio.js'
+import { listarDocumentosRelatorio } from '../shared/pdf-relatorio.js'
 
 const STORAGE_KEY = 'centralDados.relatorioAtual'
 
@@ -63,7 +66,11 @@ function coletarAnexos(contrato) {
   const doAditivos = (Array.isArray(contrato.aditivos) ? contrato.aditivos : []).flatMap((aditivo, i) =>
     (Array.isArray(aditivo.arquivos) ? aditivo.arquivos : []).map((a) => ({ ...a, origem: `Aditivo ${i + 1}` })),
   )
-  return [...doContrato, ...doAditivos].filter((a) => a && a.id)
+  // Documentos das janelas "Textos" e "Publicação" do contrato — buscados à
+  // parte (não vêm no campo inline `arquivos`, ver service-worker.js).
+  const doTextos = (Array.isArray(contrato.anexosTextos) ? contrato.anexosTextos : []).map((a) => ({ ...a, origem: 'Textos' }))
+  const daPublicacao = (Array.isArray(contrato.anexosPublicacao) ? contrato.anexosPublicacao : []).map((a) => ({ ...a, origem: 'Publicação' }))
+  return [...doContrato, ...doAditivos, ...doTextos, ...daPublicacao].filter((a) => a && a.id)
 }
 
 function nomeAnexo(a) {
@@ -91,11 +98,20 @@ function nomeUnicoNoZip(nome, usados) {
   return candidato
 }
 
-function nomeArquivoZip(contrato) {
-  const numero = contrato.numeroTermo != null
+function numeroContrato(contrato) {
+  return contrato.numeroTermo != null
     ? (contrato.ano ? `${contrato.numeroTermo}-${contrato.ano}` : String(contrato.numeroTermo))
     : `seq-${contrato.sequencial ?? 'contrato'}`
-  return `anexos-contrato-${numero}.zip`
+}
+
+function nomeArquivoZip(contrato) {
+  return `anexos-contrato-${numeroContrato(contrato)}.zip`
+}
+
+// Pasta dentro do zip que agrupa todos os anexos baixados — pedido do
+// usuário para separar melhor os documentos de cada contrato.
+function pastaAnexosNoZip(contrato) {
+  return `Anexos do contrato numero ${numeroContrato(contrato)}`
 }
 
 // Gera o PDF do relatório e baixa cada anexo via service worker (que tem a
@@ -115,17 +131,23 @@ async function montarPacoteRelatorio(contrato, anexos, container) {
 
   const usados = new Set()
   const baixados = []
+  const pasta = pastaAnexosNoZip(contrato)
 
-  const liPdf = document.createElement('li')
-  liPdf.textContent = '⏳ Relatório do contrato (PDF)'
-  lista.appendChild(liPdf)
-  try {
-    const pdfBlob = gerarPdfRelatorio(contrato)
-    const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer())
-    baixados.push({ nome: nomeUnicoNoZip('relatorio-contrato.pdf', usados), bytes: pdfBytes })
-    liPdf.textContent = '✅ Relatório do contrato (PDF)'
-  } catch (e) {
-    liPdf.textContent = `⚠️ Relatório do contrato (PDF) — erro: ${String((e && e.message) || e)}`
+  // Um PDF por documento (contrato, cada aditivo, cada solicitação de
+  // fornecimento) — pedido do usuário: relatórios separados, não um único
+  // PDF juntando tudo. Cada um gera e falha independente dos demais.
+  for (const documento of listarDocumentosRelatorio(contrato)) {
+    const li = document.createElement('li')
+    li.textContent = `⏳ ${documento.nome}`
+    lista.appendChild(li)
+    try {
+      const pdfBlob = documento.gerar()
+      const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer())
+      baixados.push({ nome: nomeUnicoNoZip(documento.nome, usados), bytes: pdfBytes })
+      li.textContent = `✅ ${documento.nome}`
+    } catch (e) {
+      li.textContent = `⚠️ ${documento.nome} — erro: ${String((e && e.message) || e)}`
+    }
   }
 
   for (const anexo of anexos) {
@@ -142,7 +164,7 @@ async function montarPacoteRelatorio(contrato, anexos, container) {
       const bin = atob(resp.base64)
       const bytes = new Uint8Array(bin.length)
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-      baixados.push({ nome: nomeUnicoNoZip(nomeAnexo(anexo), usados), bytes })
+      baixados.push({ nome: `${pasta}/${nomeUnicoNoZip(nomeAnexo(anexo), usados)}`, bytes })
       li.textContent = `✅ ${anexo.origem} — ${nomeAnexo(anexo)}`
     } catch (e) {
       li.textContent = `⚠️ ${anexo.origem} — ${nomeAnexo(anexo)} (erro: ${String((e && e.message) || e)})`
@@ -188,6 +210,17 @@ async function carregar() {
     titulo.textContent = `Itens do contrato (${contrato.itens.length})`
     containerItensContrato.appendChild(titulo)
     containerItensContrato.appendChild(tabelaItensContrato)
+  }
+
+  // Responsáveis do contrato (fiscal, gestor etc.) — seção própria com nome,
+  // tipo e período de cada um, em vez de um campo único na tabela principal.
+  const containerResponsaveis = document.getElementById('responsaveis')
+  const tabelaResponsaveis = criarTabelaDinamica(montarTabelaResponsaveis(contrato.responsaveis))
+  if (tabelaResponsaveis) {
+    const titulo = document.createElement('h2')
+    titulo.textContent = `Responsáveis (${contrato.responsaveis.length})`
+    containerResponsaveis.appendChild(titulo)
+    containerResponsaveis.appendChild(tabelaResponsaveis)
   }
 
   const secoesAditivos = montarSecoesAditivos(contrato.aditivos)
@@ -243,6 +276,75 @@ async function carregar() {
       bloco.appendChild(criarTabelaCampos(secao.campos))
 
       container.appendChild(bloco)
+    }
+  }
+
+  // Interações contábeis (empenhar/liquidar/pagar) vinculadas ao contrato —
+  // mesmo estilo de seção das solicitações de fornecimento.
+  const secoesInteracoes = montarSecoesInteracoesContabilidade(contrato.interacoesContabilidade)
+  if (secoesInteracoes.length) {
+    const container = document.getElementById('interacoesContabilidade')
+    const titulo = document.createElement('h2')
+    titulo.textContent = `Interações contábeis (${secoesInteracoes.length})`
+    container.appendChild(titulo)
+
+    for (const secao of secoesInteracoes) {
+      const bloco = document.createElement('div')
+      bloco.className = 'aditivo-secao'
+
+      const h3 = document.createElement('h3')
+      h3.textContent = secao.titulo
+      bloco.appendChild(h3)
+      bloco.appendChild(criarTabelaCampos(secao.campos))
+
+      container.appendChild(bloco)
+    }
+  }
+
+  // Recebimentos de cada solicitação de fornecimento — aba própria, separada
+  // da seção de solicitações (pedido do usuário, 2026-09-17). Cada
+  // solicitação que tem recebimento vira uma subseção, e CADA recebimento
+  // dentro dela é seu próprio bloco com TODOS os campos (pedido do usuário:
+  // a tela "Editando recebimento" do Betha tem bem mais informação que a
+  // listagem — desconto, retenção tributária, provisório, observações,
+  // comprovantes).
+  const secoesRecebimentos = montarSecoesRecebimentos(contrato.solicitacoesFornecimento)
+  if (secoesRecebimentos.length) {
+    const container = document.getElementById('recebimentos')
+    const totalRecebimentos = secoesRecebimentos.reduce((total, s) => total + s.recebimentos.length, 0)
+    const titulo = document.createElement('h2')
+    titulo.textContent = `Recebimentos (${totalRecebimentos})`
+    container.appendChild(titulo)
+
+    for (const secaoSf of secoesRecebimentos) {
+      const blocoSf = document.createElement('div')
+      blocoSf.className = 'aditivo-secao'
+
+      const h3 = document.createElement('h3')
+      h3.textContent = secaoSf.titulo
+      blocoSf.appendChild(h3)
+
+      for (const recebimento of secaoSf.recebimentos) {
+        const h4 = document.createElement('h4')
+        h4.textContent = recebimento.titulo
+        blocoSf.appendChild(h4)
+        blocoSf.appendChild(criarTabelaCampos(recebimento.campos))
+
+        // Itens efetivamente recebidos (do catálogo da solicitação) — logo
+        // abaixo dos campos deste recebimento, ou a mensagem explícita de
+        // que não há nenhum.
+        const tabelaItensRecebimento = criarTabelaDinamica(recebimento.tabelaItens)
+        if (tabelaItensRecebimento) {
+          blocoSf.appendChild(tabelaItensRecebimento)
+        } else {
+          const semItens = document.createElement('p')
+          semItens.className = 'sem-itens'
+          semItens.textContent = `${recebimento.titulo} sem itens vinculados`
+          blocoSf.appendChild(semItens)
+        }
+      }
+
+      container.appendChild(blocoSf)
     }
   }
 
