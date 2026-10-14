@@ -14,6 +14,18 @@
   // depender do palpite de constants.js (BETHA_COMPRAS).
   const SISTEMA_DA_PAGINA = window.location.hostname === 'compras.betha.cloud' ? 'compras' : 'contratos'
 
+  // Contexto (entidade + exercício) do Compras, na URL da própria página:
+  // `#/entidades/<token base64>/exercicios/<ano>` (formato confirmado no
+  // projeto irmão Delta Intelligence). No Compras o ano de um processo É o
+  // exercício do contexto, e a entidade só é resolvida pelo token da URL —
+  // por isso a sessão capturada só vale pra esse par.
+  function contextoDaPagina() {
+    const hash = window.location.hash || ''
+    const entidade = (hash.match(/#\/entidades\/([^/?#]+)/) || [])[1] || ''
+    const exercicio = (hash.match(/exercicios\/(\d{4})/) || [])[1] || ''
+    return { entidade, exercicio }
+  }
+
   function infoDaApi(url) {
     try {
       const u = new URL(url, window.location.href)
@@ -22,7 +34,7 @@
       }
       if (u.protocol !== 'https:' || !/(^|\.)betha\.cloud$/.test(u.hostname)) return null
       const prefixo = u.pathname.match(/^(.*?\/api)(\/|$)/)
-      return { sistema: 'compras', apiOrigin: u.origin, apiBasePath: prefixo ? prefixo[1] : '' }
+      return { sistema: 'compras', apiOrigin: u.origin, apiBasePath: prefixo ? prefixo[1] : '', contexto: contextoDaPagina() }
     } catch {
       return null
     }

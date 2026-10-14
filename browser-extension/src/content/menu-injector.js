@@ -164,29 +164,7 @@ function injetarMenu() {
   return true
 }
 
-// Betha Compras Cloud: o layout do menu superior ainda não foi mapeado (a
-// heurística acima é do Contratos), então lá o acesso é um botão flutuante
-// fixo no canto inferior direito, que abre o mesmo painel.
-function injetarBotaoFlutuante() {
-  if (document.getElementById('central-dados-menu-item')) return
-
-  const botao = document.createElement('button')
-  botao.id = 'central-dados-menu-item'
-  botao.type = 'button'
-  botao.className = 'central-dados-fab'
-  botao.title = MENU_LABEL
-  botao.setAttribute('aria-label', MENU_LABEL)
-  botao.innerHTML = ICONE_SVG
-  botao.addEventListener('click', abrirPainel)
-  document.body.appendChild(botao)
-}
-
 function observarMenu() {
-  if (window.location.hostname === 'compras.betha.cloud') {
-    injetarBotaoFlutuante()
-    return
-  }
-
   if (injetarMenu()) return
 
   const observer = new MutationObserver(() => {

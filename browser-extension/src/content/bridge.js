@@ -14,6 +14,7 @@ window.addEventListener('message', (event) => {
         headers: data.headers,
         apiOrigin: data.apiOrigin,
         apiBasePath: data.apiBasePath,
+        contexto: data.contexto,
       })
       .catch(() => {})
   }

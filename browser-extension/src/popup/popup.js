@@ -34,7 +34,9 @@ async function atualizarStatus() {
 
   if (resp && resp.comprasConectado) {
     statusComprasEl.className = 'status ok'
-    statusComprasTextoEl.textContent = 'Conectado à sessão do Betha Compras Cloud'
+    statusComprasTextoEl.textContent = resp.comprasExercicio
+      ? `Conectado ao Betha Compras Cloud — exercício ${resp.comprasExercicio}`
+      : 'Conectado à sessão do Betha Compras Cloud'
   } else {
     statusComprasEl.className = 'status erro'
     statusComprasTextoEl.textContent = 'Sessão não capturada — abra compras.betha.cloud e faça login'
@@ -366,31 +368,31 @@ buscarBtn.addEventListener('click', async () => {
 
 // ---------------------------------------------------------------------------
 // Processo administrativo (Betha Compras Cloud) — ver service-worker.js
-// (buscarProcessos). O catálogo de campos do Compras ainda não foi confirmado
-// ao vivo, então o card só mostra o que existir, com alternativas de nome.
+// (buscarProcessos). Campos confirmados no projeto irmão Delta Intelligence:
+// numeroProcesso, tipoObjeto.tipoDescricao (modalidade), objeto, situacaoDesc.
 // ---------------------------------------------------------------------------
 
-// Valor de texto de um campo que pode vir como string ou como objeto de
-// cadastro ({ descricao } / { nome }).
-function textoDoCampo(v) {
-  if (v == null) return ''
-  if (typeof v === 'object') return String(v.descricao ?? v.nome ?? '')
-  return String(v)
-}
+// Contexto (entidade + exercício) da sessão do Compras no momento da busca —
+// vai junto no envio: o ano do processo é o exercício, e o id do processo só
+// é único dentro da entidade.
+let contextoCompras = { entidade: '', exercicio: '' }
 
-function renderProcessos(lista) {
+function renderProcessos(lista, aproximado) {
   resultadoProcessoEl.innerHTML = ''
   if (!lista.length) {
     resultadoProcessoEl.innerHTML = '<p class="vazio">Nenhum processo administrativo encontrado.</p>'
     return
   }
+  if (aproximado) {
+    mostrarMsg('Nenhum processo com esse número exato — mostrando números parecidos.', 'info')
+  }
   for (const p of lista) {
-    const numeroBruto = p.numero ?? p.numeroProcesso
-    const anoBruto = p.ano ?? p.exercicio
-    const numero = numeroBruto != null ? (anoBruto ? `${numeroBruto}/${anoBruto}` : String(numeroBruto)) : `Id ${p.id}`
-    const situacao = textoDoCampo(p.situacaoDesc ?? p.situacao)
-    const modalidade = textoDoCampo(p.modalidade)
-    const objeto = textoDoCampo(p.objeto ?? p.descricao)
+    const numero = p.numeroProcesso != null
+      ? (contextoCompras.exercicio ? `${p.numeroProcesso}/${contextoCompras.exercicio}` : String(p.numeroProcesso))
+      : `Id ${p.id}`
+    const situacao = p.situacaoDesc || ''
+    const modalidade = (p.tipoObjeto && (p.tipoObjeto.tipoDescricao || p.tipoObjeto.descricao)) || ''
+    const objeto = p.objeto || ''
 
     const div = document.createElement('div')
     div.className = 'candidato'
@@ -406,7 +408,7 @@ function renderProcessos(lista) {
     }
     const subtitulo = document.createElement('div')
     subtitulo.className = 'subtitulo'
-    subtitulo.textContent = [modalidade, objeto].filter(Boolean).join(' · ') || 'Sem objeto informado'
+    subtitulo.textContent = [modalidade, objeto.slice(0, 120)].filter(Boolean).join(' · ') || 'Sem objeto informado'
     const acoes = document.createElement('div')
     acoes.className = 'acoes'
 
@@ -422,22 +424,30 @@ function renderProcessos(lista) {
 }
 
 async function enviarProcesso(processo, botao) {
-  mostrarMsg('Buscando lotes, itens, fornecedores e documentos do processo…', 'info')
+  mostrarMsg('Buscando itens, lotes, participantes, pareceres, histórico e demais dados do processo…', 'info')
   botao.disabled = true
   try {
-    const detalhes = await chrome.runtime.sendMessage({ type: 'buscar-detalhes-processo', id: processo.id })
+    const detalhes = await chrome.runtime.sendMessage({
+      type: 'buscar-detalhes-processo',
+      id: processo.id,
+      arquivos: processo.arquivos,
+    })
     if (detalhes && detalhes.erro) throw new Error(detalhes.erro)
-    const { avisos, ...subrecursos } = detalhes
 
     mostrarMsg('Enviando…', 'info')
     const resp = await chrome.runtime.sendMessage({
       type: 'enviar-processo-para-central',
-      processo: { ...processo, ...subrecursos },
+      processo: {
+        ...processo,
+        exercicio: contextoCompras.exercicio,
+        entidadeToken: contextoCompras.entidade,
+        subrecursos: detalhes.subrecursos,
+      },
     })
     if (resp && resp.erro) {
       mostrarMsg(resp.erro, 'erro')
-    } else if (avisos && avisos.length) {
-      mostrarMsg(`Enviado, mas: ${avisos.join('; ')}.`, 'info')
+    } else if (detalhes.avisos && detalhes.avisos.length) {
+      mostrarMsg(`Enviado, mas alguns dados não vieram: ${detalhes.avisos.join('; ')}.`, 'info')
     } else {
       mostrarMsg('Processo enviado com sucesso para a Central de Dados.', 'ok')
     }
@@ -465,7 +475,8 @@ buscarProcessoBtn.addEventListener('click', async () => {
       mostrarMsg(resp.erro, 'erro')
       return
     }
-    renderProcessos(resp.candidatos || [])
+    contextoCompras = resp.contexto || contextoCompras
+    renderProcessos(resp.candidatos || [], resp.aproximado)
   } finally {
     buscarProcessoIconeEl.innerHTML = ICONE_BUSCA_PROCESSO
     buscarProcessoTextoEl.textContent = 'Buscar processo'

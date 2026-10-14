@@ -16,7 +16,12 @@ let sessaoCompras = null
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'headers-capturados') {
     if (message.sistema === 'compras') {
-      sessaoCompras = { headers: message.headers, apiOrigin: message.apiOrigin, apiBasePath: message.apiBasePath }
+      sessaoCompras = {
+        headers: message.headers,
+        apiOrigin: message.apiOrigin,
+        apiBasePath: message.apiBasePath,
+        contexto: message.contexto || { entidade: '', exercicio: '' },
+      }
       chrome.storage.session.set({ [STORAGE_KEYS.HEADERS_COMPRAS]: sessaoCompras }).catch(() => {})
     } else {
       headersCapturados = message.headers
@@ -28,7 +33,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === 'status') {
     Promise.all([resolverHeaders(), resolverSessaoCompras()]).then(([h, compras]) =>
-      sendResponse({ conectado: !!h, comprasConectado: !!compras }),
+      sendResponse({
+        conectado: !!h,
+        comprasConectado: !!compras,
+        comprasExercicio: (compras && compras.contexto && compras.contexto.exercicio) || '',
+      }),
     )
     return true
   }
@@ -36,13 +45,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // Processo administrativo do Betha Compras Cloud (ver buscarProcessos).
   if (message.type === 'buscar-processo') {
     buscarProcessos(message.numero, message.ano)
-      .then((candidatos) => sendResponse({ candidatos }))
+      .then(sendResponse)
       .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
     return true
   }
 
   if (message.type === 'buscar-detalhes-processo') {
-    buscarDetalhesProcesso(message.id)
+    buscarDetalhesProcesso(message.id, message.arquivos)
       .then(sendResponse)
       .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
     return true
@@ -599,12 +608,9 @@ async function buscarItensRecebimento(contratoId, solicitacaoId, recebimentoId) 
 // ---------------------------------------------------------------------------
 // Betha Compras Cloud — processos administrativos (somente leitura)
 //
-// NADA disto foi confirmado ao vivo (ver constants.js, BETHA_COMPRAS): o
-// caminho da coleção, a sintaxe do `filter` e os nomes dos sub-recursos são
-// palpites pelo padrão do Betha Contratos. Se uma busca falhar com 404/400,
-// o primeiro lugar a corrigir são as constantes e o filtro abaixo, conferindo
-// a requisição real na aba Rede (DevTools) de uma tela de processo
-// administrativo em compras.betha.cloud.
+// Recurso `processosadministrativo`, filtro e sub-recursos confirmados ao vivo
+// no projeto irmão Delta Intelligence (ver constants.js, BETHA_COMPRAS;
+// collector.js `consultarProcesso` e betha/selectors.md de lá). Só GET.
 // ---------------------------------------------------------------------------
 
 async function resolverSessaoCompras() {
@@ -614,21 +620,27 @@ async function resolverSessaoCompras() {
   return sessaoCompras
 }
 
-// URL base da API do Compras: a origem/prefixo observados na página, com o
-// palpite de constants.js só como fallback.
+async function exigirSessaoCompras() {
+  const sessao = await resolverSessaoCompras()
+  if (!sessao) {
+    throw new Error('Sessão do Betha Compras Cloud não capturada. Abra compras.betha.cloud, faça login, navegue por alguma tela e tente de novo.')
+  }
+  return sessao
+}
+
+// URL base da API do Compras: a origem/prefixo observados na página, com
+// constants.js só como fallback.
 function baseApiCompras(sessao) {
   const origem = sessao.apiOrigin || `https://${BETHA_COMPRAS.apiHost}`
   const prefixo = sessao.apiOrigin ? sessao.apiBasePath || '' : BETHA_COMPRAS.basePath
   return `${origem}${prefixo}`
 }
 
-async function getCompras(caminho, params) {
-  const sessao = await resolverSessaoCompras()
-  if (!sessao) {
-    throw new Error('Sessão do Betha Compras Cloud não capturada. Abra compras.betha.cloud, faça login, navegue por alguma tela e tente de novo.')
-  }
+// GET no Compras; devolve a Response crua (quem chama decide o que fazer com
+// 404/400).
+async function getCompras(sessao, caminho, params) {
   const query = params ? `?${new URLSearchParams(params)}` : ''
-  const resp = await fetch(`${baseApiCompras(sessao)}/${caminho}${query}`, {
+  return fetch(`${baseApiCompras(sessao)}/${caminho}${query}`, {
     method: 'GET',
     headers: {
       Authorization: montarAuthorization(sessao.headers.authorization),
@@ -636,69 +648,115 @@ async function getCompras(caminho, params) {
       'User-Access': sessao.headers.userAccess,
     },
   })
-  return resp
 }
 
-// Processos administrativos por número/ano (ano opcional).
-async function buscarProcessos(numero, ano) {
-  const numLimpo = String(numero || '').replace(/\D/g, '')
-  if (!numLimpo) throw new Error('Informe o número do processo administrativo (ex.: 45/2026).')
-  const anoLimpo = String(ano || '').replace(/\D/g, '')
-  const filter = anoLimpo ? `(((numero = ${numLimpo} and ano = ${anoLimpo})))` : `(((numero = ${numLimpo})))`
-
-  const resp = await getCompras(ENDPOINT_PROCESSOS, { filter, limit: '20', offset: '0', sort: '', total: 'false' })
-  if (!resp.ok) {
-    throw new Error(
-      `API do Betha Compras respondeu ${resp.status} ao buscar processos (${ENDPOINT_PROCESSOS}). ` +
-        'O caminho/filtro ainda não foi confirmado ao vivo — confira a requisição real no DevTools.',
-    )
-  }
+async function listarProcessos(sessao, filter) {
+  const resp = await getCompras(sessao, ENDPOINT_PROCESSOS, { offset: '0', limit: '20', filter })
+  if (!resp.ok) throw new Error(`API do Betha Compras respondeu ${resp.status} ao buscar processos administrativos`)
   const dados = await resp.json()
   return Array.isArray(dados) ? dados : dados.content || []
 }
 
-// Sub-recurso paginado de UM processo. Diferente de buscarSubrecurso (Betha
-// Contratos), 404/400 NÃO vira lista vazia em silêncio: como o caminho não foi
-// confirmado, devolve também um `aviso` pro popup mostrar. Páginas por
-// offset/hasNext (mesmo formato dos demais endpoints do Betha).
-async function buscarSubrecursoProcesso(processoId, subrecurso) {
-  const PAGINA = 50
+// Processo administrativo pelo número. No Compras o processo é identificado
+// só pelo número (confirmado ao vivo: `numeroprocesso = "185"`); o ano é o
+// EXERCÍCIO do contexto da sessão, não um campo do registro. Por isso, se o
+// usuário digitou um ano diferente do exercício em que a sessão está, avisa em
+// vez de devolver o processo de outro exercício. Sem resultado exato, devolve
+// os parecidos (`elike`), marcados como `aproximado`.
+async function buscarProcessos(numero, ano) {
+  const numLimpo = String(numero || '').replace(/\D/g, '')
+  if (!numLimpo) throw new Error('Informe o número do processo administrativo (ex.: 45/2026).')
+
+  const sessao = await exigirSessaoCompras()
+  const exercicio = (sessao.contexto && sessao.contexto.exercicio) || ''
+  const anoLimpo = String(ano || '').replace(/\D/g, '')
+  if (anoLimpo && exercicio && anoLimpo !== exercicio) {
+    throw new Error(
+      `A sessão do Compras Cloud está no exercício ${exercicio}, mas você pediu ${anoLimpo}. ` +
+        'No Compras o ano do processo é o exercício: troque o exercício em compras.betha.cloud e tente de novo.',
+    )
+  }
+
+  const contexto = sessao.contexto || { entidade: '', exercicio: '' }
+  const exatos = await listarProcessos(sessao, `numeroprocesso = "${numLimpo}"`)
+  if (exatos.length) return { candidatos: exatos, aproximado: false, contexto }
+
+  const parecidos = await listarProcessos(sessao, `numeroprocesso elike "%${numLimpo}%"`)
+  return { candidatos: parecidos, aproximado: true, contexto }
+}
+
+// Sub-recurso paginado de UM processo. 404/400 = sem registros (muitos
+// processos não têm todos os sub-recursos). Mesmo envelope paginado do
+// Betha, throttle entre páginas como nos demais.
+async function buscarSubrecursoProcesso(sessao, processoId, subrecurso) {
+  const PAGINA = 100
   const MAX = 500
   const registros = []
   let offset = 0
   let hasNext = true
 
-  while (hasNext && offset < MAX) {
-    const resp = await getCompras(`${ENDPOINT_PROCESSOS}/${limparId(processoId)}/${subrecurso}`, {
+  while (hasNext && registros.length < MAX) {
+    const resp = await getCompras(sessao, `${ENDPOINT_PROCESSOS}/${limparId(processoId)}/${subrecurso}`, {
       offset: String(offset),
       limit: String(PAGINA),
     })
     if (!resp.ok) {
-      const aviso = `${subrecurso}: a API respondeu ${resp.status} (sem registros ou caminho não confirmado)`
-      if (offset === 0 && (resp.status === 404 || resp.status === 400)) return { registros: [], aviso }
-      throw new Error(`API do Betha Compras respondeu ${resp.status} ao buscar ${subrecurso} do processo`)
+      if (offset === 0 && (resp.status === 404 || resp.status === 400)) return []
+      throw new Error(`a API respondeu ${resp.status}`)
     }
     const dados = await resp.json()
     const pagina = Array.isArray(dados) ? dados : dados.content || []
     registros.push(...pagina)
     if (Array.isArray(dados) || !pagina.length) break
     hasNext = !!dados.hasNext
-    offset += PAGINA
+    offset = (typeof dados.offset === 'number' ? dados.offset : offset) + pagina.length
   }
-  return { registros, aviso: null }
+  return registros
 }
 
-// Lotes, itens, fornecedores/propostas e documentos de um processo — um
-// sub-recurso por vez (mesma cautela contra rajada dos demais). Devolve
-// `{ lotes, itens, fornecedores, documentos, avisos }`.
-async function buscarDetalhesProcesso(processoId) {
-  const resultado = { avisos: [] }
-  for (const [chave, subrecurso] of Object.entries(SUBRECURSOS_PROCESSO)) {
-    const { registros, aviso } = await buscarSubrecursoProcesso(processoId, subrecurso)
-    resultado[chave] = registros
-    if (aviso) resultado.avisos.push(aviso)
+// Anexos (metadados: nome/id/tipo/tamanho — o conteúdo não é baixado) ficam no
+// campo inline `arquivos` do processo e dentro dos `textos` (cada texto traz
+// `arquivos` inline ou só no GET do texto individual). Mesma regra do Delta
+// Intelligence (`_coletarAnexosDeTextos`); sequencial pra não rajar a API.
+async function coletarAnexosProcesso(sessao, processoId, arquivosInline, textos) {
+  const anexos = Array.isArray(arquivosInline) ? [...arquivosInline] : []
+  for (const texto of textos) {
+    let arquivos = Array.isArray(texto && texto.arquivos) ? texto.arquivos : null
+    if (!arquivos && texto && texto.id != null) {
+      const resp = await getCompras(sessao, `${ENDPOINT_PROCESSOS}/${limparId(processoId)}/textos/${limparId(texto.id)}`)
+      const detalhe = resp.ok ? await resp.json() : null
+      arquivos = Array.isArray(detalhe && detalhe.arquivos) ? detalhe.arquivos : []
+    }
+    anexos.push(...arquivos)
   }
-  return resultado
+  return anexos
+}
+
+// Todos os sub-recursos de um processo — um por vez (mesma cautela contra
+// rajada dos demais). Falha em UM sub-recurso (ex.: 403/500) não derruba os
+// outros: vira aviso. Devolve `{ subrecursos: { <tipo>: [...] }, avisos }`.
+async function buscarDetalhesProcesso(processoId, arquivosInline) {
+  const sessao = await exigirSessaoCompras()
+  const subrecursos = {}
+  const avisos = []
+
+  for (const [tipo, caminho] of Object.entries(SUBRECURSOS_PROCESSO)) {
+    try {
+      subrecursos[tipo] = await buscarSubrecursoProcesso(sessao, processoId, caminho)
+    } catch (e) {
+      subrecursos[tipo] = []
+      avisos.push(`${tipo}: ${String((e && e.message) || e)}`)
+    }
+  }
+
+  try {
+    subrecursos.anexos = await coletarAnexosProcesso(sessao, processoId, arquivosInline, subrecursos.textos || [])
+  } catch (e) {
+    subrecursos.anexos = []
+    avisos.push(`anexos: ${String((e && e.message) || e)}`)
+  }
+
+  return { subrecursos, avisos }
 }
 
 function enviarParaCentral(contrato) {

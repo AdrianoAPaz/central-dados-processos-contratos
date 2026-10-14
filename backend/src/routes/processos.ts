@@ -12,17 +12,23 @@ import {
 
 export const processosRouter = Router();
 
-// Texto de um campo que pode vir como string ou como objeto de cadastro do
-// Betha ({ descricao } / { nome }).
-function texto(valor: unknown): string | null {
-  if (valor == null) return null;
-  if (typeof valor === 'object') {
-    const obj = valor as Record<string, unknown>;
-    const interno = obj.descricao ?? obj.nome;
-    return interno != null ? String(interno) : null;
-  }
-  return String(valor);
-}
+// Sub-recursos de um processo administrativo do Betha Compras Cloud (ver
+// SUBRECURSOS_PROCESSO em browser-extension/src/shared/constants.js; `anexos`
+// são os metadados dos arquivos, montados pela extensão). Só estes `tipo`
+// são aceitos no corpo; o valor é o nome da aba no relatório em Excel.
+const TIPOS_SUBRECURSO: Record<string, string> = {
+  itens: 'Itens',
+  lotes: 'Lotes',
+  participantes: 'Participantes',
+  despesas: 'Despesas',
+  sessoesjulgamento: 'Sessões de julgamento',
+  pareceres: 'Pareceres',
+  atosfinais: 'Atos finais',
+  historico: 'Histórico',
+  atas: 'Atas de registro de preços',
+  textos: 'Textos',
+  anexos: 'Anexos',
+};
 
 function inteiro(valor: unknown): number | null {
   if (valor == null || valor === '') return null;
@@ -30,70 +36,85 @@ function inteiro(valor: unknown): number | null {
   return Number.isFinite(n) ? Math.trunc(n) : null;
 }
 
+function texto(valor: unknown): string | null {
+  return valor != null && valor !== '' ? String(valor) : null;
+}
+
+function data(valor: unknown): Date | null {
+  if (typeof valor !== 'string' || !valor) return null;
+  const d = new Date(valor);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function listaDe(valor: unknown): Record<string, unknown>[] {
   return Array.isArray(valor) ? (valor as Record<string, unknown>[]) : [];
 }
 
-// Body esperado: o JSON cru de um registro de processo administrativo do
-// Betha Compras Cloud, mais os sub-recursos buscados pela extensão em campos
-// à parte (`lotes`, `itens`, `fornecedores`, `documentos` — nunca dentro de
-// `dadosBrutos` do processo em si). O catálogo de campos do Compras ainda não
-// foi confirmado ao vivo, então os campos achatados abaixo tentam alguns nomes
-// candidatos e ficam nulos se nenhum existir — nada se perde, `dadosBrutos`
-// guarda o JSON completo.
+// Body esperado: o JSON cru de um registro de `processosadministrativo` do
+// Betha Compras Cloud, mais três campos que a extensão acrescenta —
+// `exercicio` e `entidadeToken` (o contexto da sessão: o ano do processo É o
+// exercício, e o id só é único dentro da entidade) e `subrecursos` (um array
+// por tipo, buscado à parte em processosadministrativo/{id}/<subrecurso>,
+// nunca dentro de `dadosBrutos`). Nomes de campo confirmados no projeto irmão
+// Delta Intelligence (betha/selectors.md).
 function mapearProcesso(body: Record<string, unknown>) {
-  const { lotes, itens, fornecedores, documentos, ...raw } = body;
-  void lotes;
-  void itens;
-  void fornecedores;
-  void documentos;
+  const { subrecursos, exercicio, entidadeToken, ...raw } = body;
+  void subrecursos;
 
   const idBetha = inteiro(raw.id);
   if (idBetha == null) {
     throw new Error('Campo obrigatório ausente: id');
   }
 
-  const numero = inteiro(raw.numero ?? raw.numeroProcesso);
-  const ano = inteiro(raw.ano ?? raw.exercicio);
-  const entidade = raw.entidade as Record<string, unknown> | undefined;
+  const numero = inteiro(raw.numeroProcesso);
+  const ano = inteiro(exercicio);
+  const tipoObjeto = raw.tipoObjeto as Record<string, unknown> | undefined;
+  const valorTotalItens = raw.valorTotalItens != null && raw.valorTotalItens !== '' ? Number(raw.valorTotalItens) : null;
 
   return {
+    entidadeToken: typeof entidadeToken === 'string' ? entidadeToken.slice(0, 200) : '',
     idBetha,
     numero,
     ano,
     numeroFormatado: numero != null ? (ano != null ? `${numero}/${ano}` : String(numero)) : null,
-    objeto: texto(raw.objeto ?? raw.descricao),
-    modalidade: texto(raw.modalidade),
-    situacao: texto(raw.situacaoDesc ?? raw.situacao),
-    entidadeNome: texto(entidade?.nome ?? raw.entidade),
+    objeto: texto(raw.objeto),
+    modalidade: texto(tipoObjeto?.tipoDescricao ?? tipoObjeto?.descricao),
+    situacao: texto(raw.situacao),
+    situacaoDesc: texto(raw.situacaoDesc),
+    dataProcesso: data(raw.dataProcesso),
+    valorTotalItens: valorTotalItens != null && Number.isFinite(valorTotalItens) ? String(valorTotalItens) : null,
+    quantidadeItens: inteiro(raw.quantidadeItens),
     dadosBrutos: raw as Prisma.InputJsonObject,
   };
 }
 
-function comOrdem(registros: Record<string, unknown>[], processoId: string) {
-  return registros.map((raw, i) => ({
-    processoId,
-    ordem: i + 1,
-    dadosBrutos: raw as Prisma.InputJsonObject,
-  }));
-}
-
 processosRouter.get('/', async (_req, res) => {
-  const processos = await prisma.processoAdministrativo.findMany({
-    orderBy: { atualizadoEm: 'desc' },
-    select: {
-      id: true,
-      idBetha: true,
-      numeroFormatado: true,
-      objeto: true,
-      modalidade: true,
-      situacao: true,
-      entidadeNome: true,
-      atualizadoEm: true,
-      _count: { select: { lotes: true, itens: true, fornecedores: true, documentos: true } },
-    },
-  });
-  res.json(processos);
+  const [processos, contagens] = await Promise.all([
+    prisma.processoAdministrativo.findMany({
+      orderBy: { atualizadoEm: 'desc' },
+      select: {
+        id: true,
+        idBetha: true,
+        numeroFormatado: true,
+        objeto: true,
+        modalidade: true,
+        situacaoDesc: true,
+        dataProcesso: true,
+        valorTotalItens: true,
+        atualizadoEm: true,
+      },
+    }),
+    prisma.subrecursoProcesso.groupBy({ by: ['processoId', 'tipo'], _count: { _all: true } }),
+  ]);
+
+  const porProcesso = new Map<string, Record<string, number>>();
+  for (const c of contagens) {
+    const mapa = porProcesso.get(c.processoId) ?? {};
+    mapa[c.tipo] = c._count._all;
+    porProcesso.set(c.processoId, mapa);
+  }
+
+  res.json(processos.map((p) => ({ ...p, contagens: porProcesso.get(p.id) ?? {} })));
 });
 
 processosRouter.post('/', async (req, res) => {
@@ -106,24 +127,29 @@ processosRouter.post('/', async (req, res) => {
     return;
   }
 
+  const recebidos = (body.subrecursos ?? {}) as Record<string, unknown>;
+
   // Reimportar sempre substitui os sub-recursos anteriores (evita duplicar ou
   // deixar órfão o que foi removido no Compras) — mesma regra dos contratos.
   const processo = await prisma.$transaction(async (tx) => {
+    const { entidadeToken, idBetha } = dados;
     const salvo = await tx.processoAdministrativo.upsert({
-      where: { idBetha: dados.idBetha },
+      where: { entidadeToken_idBetha: { entidadeToken, idBetha } },
       create: dados,
       update: dados,
     });
 
-    await tx.loteProcesso.deleteMany({ where: { processoId: salvo.id } });
-    await tx.itemProcesso.deleteMany({ where: { processoId: salvo.id } });
-    await tx.fornecedorProcesso.deleteMany({ where: { processoId: salvo.id } });
-    await tx.documentoProcesso.deleteMany({ where: { processoId: salvo.id } });
-
-    await tx.loteProcesso.createMany({ data: comOrdem(listaDe(body.lotes), salvo.id) });
-    await tx.itemProcesso.createMany({ data: comOrdem(listaDe(body.itens), salvo.id) });
-    await tx.fornecedorProcesso.createMany({ data: comOrdem(listaDe(body.fornecedores), salvo.id) });
-    await tx.documentoProcesso.createMany({ data: comOrdem(listaDe(body.documentos), salvo.id) });
+    await tx.subrecursoProcesso.deleteMany({ where: { processoId: salvo.id } });
+    await tx.subrecursoProcesso.createMany({
+      data: Object.keys(TIPOS_SUBRECURSO).flatMap((tipo) =>
+        listaDe(recebidos[tipo]).map((raw, i) => ({
+          processoId: salvo.id,
+          tipo,
+          ordem: i + 1,
+          dadosBrutos: raw as Prisma.InputJsonObject,
+        })),
+      ),
+    });
 
     return salvo;
   });
@@ -134,12 +160,7 @@ processosRouter.post('/', async (req, res) => {
 function buscarProcesso(id: string) {
   return prisma.processoAdministrativo.findUnique({
     where: { id },
-    include: {
-      lotes: { orderBy: { ordem: 'asc' } },
-      itens: { orderBy: { ordem: 'asc' } },
-      fornecedores: { orderBy: { ordem: 'asc' } },
-      documentos: { orderBy: { ordem: 'asc' } },
-    },
+    include: { subrecursos: { orderBy: [{ tipo: 'asc' }, { ordem: 'asc' }] } },
   });
 }
 
@@ -154,8 +175,7 @@ processosRouter.get('/:id', async (req, res) => {
 
 // Tabela com uma linha por registro e uma coluna por chave encontrada (união
 // das chaves de todos os registros, na ordem em que aparecem) — o catálogo de
-// campos dos sub-recursos do Compras não foi confirmado, então não há colunas
-// fixas como nos itens de contrato.
+// campos dos sub-recursos não foi mapeado, então não há colunas fixas.
 function preencherPlanilhaTabelaDinamica(planilha: ExcelJS.Worksheet, registros: Array<{ dadosBrutos: unknown }>) {
   const chaves: string[] = [];
   for (const { dadosBrutos } of registros) {
@@ -185,14 +205,9 @@ processosRouter.get('/:id/relatorio', async (req, res) => {
   const workbook = new ExcelJS.Workbook();
   preencherPlanilhaCamposDinamicos(workbook.addWorksheet('Processo'), processo.dadosBrutos as Record<string, unknown>);
 
-  const abas: Array<[string, Array<{ dadosBrutos: unknown }>]> = [
-    ['Lotes', processo.lotes],
-    ['Itens', processo.itens],
-    ['Fornecedores', processo.fornecedores],
-    ['Documentos', processo.documentos],
-  ];
-  for (const [nome, registros] of abas) {
-    if (registros.length > 0) preencherPlanilhaTabelaDinamica(workbook.addWorksheet(nome), registros);
+  for (const [tipo, nomeAba] of Object.entries(TIPOS_SUBRECURSO)) {
+    const registros = processo.subrecursos.filter((s) => s.tipo === tipo);
+    if (registros.length > 0) preencherPlanilhaTabelaDinamica(workbook.addWorksheet(nomeAba.slice(0, 31)), registros);
   }
 
   const nomeArquivo = slug(`processo ${processo.numeroFormatado ?? `id ${processo.idBetha}`}`);

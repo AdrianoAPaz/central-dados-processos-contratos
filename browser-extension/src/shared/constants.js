@@ -14,31 +14,36 @@ export const ENDPOINT_CONTRATACOES = 'contratacoes'
 export const AMBIENTE_CONTRATACAO_TODAS = 'TODAS'
 
 // Betha Compras Cloud (compras.betha.cloud) — processos administrativos.
-// ATENÇÃO: nenhum destes valores foi confirmado ao vivo (diferente do Betha
-// Contratos acima) — são palpites pelo mesmo padrão do Contratos
-// (api.<sistema>.betha.cloud/<sistema>/api). A extensão captura a sessão e a
-// ORIGEM real da API a partir das requisições da própria página do Compras
-// (ver page/interceptor.js), então `apiHost`/`basePath` abaixo só valem como
-// fallback; os caminhos de `ENDPOINT_PROCESSOS` e `SUBRECURSOS_PROCESSO` e a
-// sintaxe do filtro (service-worker.js, buscarProcessos) precisam ser
-// conferidos na aba Rede do navegador (DevTools) numa tela de processo
-// administrativo e corrigidos aqui se divergirem. 404/400 em um sub-recurso
-// aparece como aviso no popup, não como erro silencioso.
+// Host, caminho base, recurso e sub-recursos confirmados ao vivo no projeto
+// irmão Delta Intelligence (betha/selectors.md, 2026-07-01 a 2026-07-17):
+// GET api.compras.betha.cloud/compras/api/processosadministrativo e
+// processosadministrativo/{id}/<subrecurso>, mesmo envelope paginado do
+// Contratos ({ offset, limit, hasNext, content, total }). A extensão ainda
+// usa a ORIGEM observada nas requisições da própria página (ver
+// page/interceptor.js) e só cai neste host/caminho como fallback.
 export const BETHA_COMPRAS = {
   siteHost: 'compras.betha.cloud',
   apiHost: 'api.compras.betha.cloud',
   basePath: '/compras/api',
 }
 
-export const ENDPOINT_PROCESSOS = 'processosadministrativos'
+export const ENDPOINT_PROCESSOS = 'processosadministrativo'
 
-// chave no registro enviado à Central -> caminho relativo a
-// `<ENDPOINT_PROCESSOS>/{id}/`.
+// chave (`tipo` enviado à Central) -> caminho relativo a
+// `<ENDPOINT_PROCESSOS>/{id}/`. Os oito primeiros respondem 200 (probe do
+// Delta Intelligence); `textos` (só consulta sob demanda lá) e
+// `atasregistropreco` (atas ligadas ao processo, confirmado 2026-07-06) também.
 export const SUBRECURSOS_PROCESSO = {
-  lotes: 'lotes',
   itens: 'itens',
-  fornecedores: 'participantes',
-  documentos: 'documentos',
+  despesas: 'despesas',
+  lotes: 'lotes',
+  sessoesjulgamento: 'sessoesjulgamento',
+  historico: 'historico',
+  pareceres: 'pareceres',
+  atosfinais: 'atosfinais',
+  participantes: 'participantes',
+  textos: 'textos',
+  atas: 'atasregistropreco',
 }
 
 export const STORAGE_KEYS = {

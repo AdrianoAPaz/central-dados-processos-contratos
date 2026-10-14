@@ -59,15 +59,18 @@ template original (que dependia de usuário autenticado) foi removida.
 ## Processos administrativos (Betha Compras Cloud)
 
 A extensão de navegador (`browser-extension/`) tem, além da busca de contratos, o campo **Processo
-administrativo (Compras Cloud) — Número/Ano**. Ela busca o processo (e seus lotes, itens,
-fornecedores/propostas e documentos) usando a sua sessão logada em `compras.betha.cloud` e envia
-para `POST /api/processos`; a página **Processos administrativos** do frontend lista o que foi
-enviado e baixa o relatório em Excel (`GET /api/processos/:id/relatorio`).
+administrativo (Compras Cloud) — Número/Ano**, disponível também dentro de `compras.betha.cloud`
+(ícone no menu superior, igual ao Contratos). Ela busca o processo (`processosadministrativo`) e seus
+sub-recursos (itens, lotes, participantes, despesas, sessões de julgamento, pareceres, atos finais,
+histórico, textos, atas e anexos) usando a sua sessão logada e envia para `POST /api/processos`; a
+página **Processos administrativos** do frontend lista o que foi enviado e baixa o relatório em
+Excel (`GET /api/processos/:id/relatorio`).
 
 Pra funcionar, abra `compras.betha.cloud`, faça login e navegue por qualquer tela (é assim que a
-extensão captura a sessão). **Os endpoints do Compras Cloud ainda não foram confirmados ao vivo** —
-ver `browser-extension/src/shared/constants.js` (`BETHA_COMPRAS`, `ENDPOINT_PROCESSOS`,
-`SUBRECURSOS_PROCESSO`) e o filtro em `buscarProcessos` no `service-worker.js`.
+extensão captura a sessão). **No Compras o ano do processo é o exercício da sessão**: o popup mostra
+o exercício conectado, e pedir "45/2026" com a sessão em outro exercício dá um aviso — troque o
+exercício no Compras antes. Endpoints e filtro vêm do projeto irmão Delta Intelligence (ver
+`browser-extension/src/shared/constants.js` e `buscarProcessos` no `service-worker.js`).
 
 ## Comandos úteis
 

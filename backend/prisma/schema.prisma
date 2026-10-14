@@ -230,97 +230,67 @@ model ResponsavelContrato {
   @@map("responsavel_contrato")
 }
 
-// Um processo administrativo do Betha Compras Cloud (compras.betha.cloud) —
-// buscado ao vivo pela extensão de navegador a partir do número/ano digitado
-// no popup. O catálogo de campos do Compras Cloud ainda NÃO foi confirmado ao
-// vivo (diferente do Betha Contratos), então só achatamos o mínimo necessário
-// pra listar/identificar o processo (extraído defensivamente, ver
-// backend/src/routes/processos.ts); `dadosBrutos` guarda o JSON completo pra
-// nunca perder informação. `idBetha` é o id interno do processo no Compras
-// Cloud (único), usado como chave do upsert. Um Contrato se relaciona com o
-// processo pelo par processoNumero/processoAno (sem chave estrangeira — o
-// processo pode ainda não ter sido importado).
+// Um processo administrativo do Betha Compras Cloud (compras.betha.cloud,
+// recurso `processosadministrativo`) — buscado ao vivo pela extensão de
+// navegador a partir do número digitado no popup. Campos achatados abaixo
+// confirmados no projeto irmão Delta Intelligence (betha/selectors.md):
+// numeroProcesso, dataProcesso, tipoObjeto.tipoDescricao (modalidade), objeto,
+// situacao/situacaoDesc, valorTotalItens, quantidadeItens. `dadosBrutos` guarda
+// o JSON completo pra nunca perder informação.
+//
+// No Compras o processo é identificado só pelo número: o ano é o EXERCÍCIO do
+// contexto em que a sessão está (URL `#/entidades/<token>/exercicios/<ano>`),
+// não um campo do registro — por isso `ano`/`entidadeToken` vêm do contexto
+// capturado pela extensão. `idBetha` (id interno) só é único dentro de uma
+// entidade/banco do Betha, daí a chave composta com `entidadeToken` (o token
+// base64 da entidade na URL, ex. "database:135094,entity:11747").
 model ProcessoAdministrativo {
-  id      String @id @default(cuid())
-  idBetha Int    @unique @map("id_betha")
+  id            String @id @default(cuid())
+  entidadeToken String @default("") @map("entidade_token")
+  idBetha       Int    @map("id_betha")
 
   numero          Int?
   ano             Int?
-  // "45/2026" — numero + ano já formatados, pra exibir/exportar direto.
-  numeroFormatado String? @map("numero_formatado")
+  // "45/2026" — numero + exercício já formatados, pra exibir/exportar direto.
+  numeroFormatado String?   @map("numero_formatado")
   objeto          String?
   modalidade      String?
   situacao        String?
-  entidadeNome    String? @map("entidade_nome")
+  situacaoDesc    String?   @map("situacao_desc")
+  dataProcesso    DateTime? @map("data_processo")
+  valorTotalItens Decimal?  @map("valor_total_itens") @db.Decimal(16, 2)
+  quantidadeItens Int?      @map("quantidade_itens")
 
   dadosBrutos Json @map("dados_brutos")
 
-  lotes        LoteProcesso[]
-  itens        ItemProcesso[]
-  fornecedores FornecedorProcesso[]
-  documentos   DocumentoProcesso[]
+  subrecursos SubrecursoProcesso[]
 
   criadoEm     DateTime @default(now()) @map("criado_em")
   atualizadoEm DateTime @updatedAt @map("atualizado_em")
 
+  @@unique([entidadeToken, idBetha])
   @@index([numero, ano])
   @@map("processo_administrativo")
 }
 
-// Sub-recursos do processo administrativo (lotes, itens, fornecedores/
-// propostas e documentos/anexos). Mesmo motivo do model Aditivo pra não
-// achatar campos: catálogo não confirmado ao vivo, guardamos o JSON cru e o
-// relatório extrai as colunas dinamicamente. `ordem` é a posição no array
-// recebido. Documentos guardam só os metadados (nome, tipo, tamanho) — o
-// conteúdo dos arquivos não é baixado.
-model LoteProcesso {
+// Um registro de um sub-recurso do processo administrativo — `tipo` é o nome
+// do sub-recurso no Betha: itens, despesas, lotes, sessoesjulgamento,
+// historico, pareceres, atosfinais, participantes, textos, atas (de
+// `atasregistropreco`) ou anexos (metadados dos arquivos, de `arquivos`
+// inline + dos `textos`; o conteúdo dos arquivos não é baixado). Um modelo só
+// pra todos porque o catálogo de campos de cada um não foi mapeado: guardamos
+// o JSON cru e o relatório extrai as colunas dinamicamente. `ordem` é a
+// posição no array recebido (já ordenado pela API do Betha).
+model SubrecursoProcesso {
   id         String                 @id @default(cuid())
   processoId String                 @map("processo_id")
   processo   ProcessoAdministrativo @relation(fields: [processoId], references: [id], onDelete: Cascade)
 
+  tipo        String
   ordem       Int
   dadosBrutos Json     @map("dados_brutos")
   criadoEm    DateTime @default(now()) @map("criado_em")
 
-  @@unique([processoId, ordem])
-  @@map("lote_processo")
-}
-
-model ItemProcesso {
-  id         String                 @id @default(cuid())
-  processoId String                 @map("processo_id")
-  processo   ProcessoAdministrativo @relation(fields: [processoId], references: [id], onDelete: Cascade)
-
-  ordem       Int
-  dadosBrutos Json     @map("dados_brutos")
-  criadoEm    DateTime @default(now()) @map("criado_em")
-
-  @@unique([processoId, ordem])
-  @@map("item_processo")
-}
-
-model FornecedorProcesso {
-  id         String                 @id @default(cuid())
-  processoId String                 @map("processo_id")
-  processo   ProcessoAdministrativo @relation(fields: [processoId], references: [id], onDelete: Cascade)
-
-  ordem       Int
-  dadosBrutos Json     @map("dados_brutos")
-  criadoEm    DateTime @default(now()) @map("criado_em")
-
-  @@unique([processoId, ordem])
-  @@map("fornecedor_processo")
-}
-
-model DocumentoProcesso {
-  id         String                 @id @default(cuid())
-  processoId String                 @map("processo_id")
-  processo   ProcessoAdministrativo @relation(fields: [processoId], references: [id], onDelete: Cascade)
-
-  ordem       Int
-  dadosBrutos Json     @map("dados_brutos")
-  criadoEm    DateTime @default(now()) @map("criado_em")
-
-  @@unique([processoId, ordem])
-  @@map("documento_processo")
+  @@unique([processoId, tipo, ordem])
+  @@map("subrecurso_processo")
 }

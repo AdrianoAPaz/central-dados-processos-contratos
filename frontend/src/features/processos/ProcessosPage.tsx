@@ -7,10 +7,32 @@ interface Processo {
   numeroFormatado: string | null;
   objeto: string | null;
   modalidade: string | null;
-  situacao: string | null;
-  entidadeNome: string | null;
+  situacaoDesc: string | null;
+  dataProcesso: string | null;
+  valorTotalItens: string | null;
   atualizadoEm: string;
-  _count: { lotes: number; itens: number; fornecedores: number; documentos: number };
+  contagens: Record<string, number>;
+}
+
+// Rótulo + chave dos sub-recursos mostrados no resumo de cada processo.
+const RESUMO: Array<[string, string]> = [
+  ['itens', 'itens'],
+  ['lotes', 'lotes'],
+  ['participantes', 'participantes'],
+  ['pareceres', 'pareceres'],
+  ['sessoesjulgamento', 'sessões de julgamento'],
+  ['anexos', 'anexos'],
+];
+
+function formatarData(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${String(d.getUTCDate()).padStart(2, '0')}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${d.getUTCFullYear()}`;
+}
+
+function formatarValor(valor: string | null): string | null {
+  return valor != null ? Number(valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : null;
 }
 
 // Os processos chegam pela extensão de navegador (campo "Processo
@@ -49,11 +71,16 @@ export function ProcessosPage() {
                 <div>
                   <strong>{p.numeroFormatado ?? `Id ${p.idBetha}`}</strong> — {p.objeto || 'sem objeto'}
                   <br />
-                  <span>{[p.modalidade, p.situacao, p.entidadeNome].filter(Boolean).join(' · ')}</span>
+                  <span>
+                    {[p.modalidade, p.situacaoDesc, formatarData(p.dataProcesso), formatarValor(p.valorTotalItens)]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
                   <br />
                   <span>
-                    {p._count.lotes} lotes · {p._count.itens} itens · {p._count.fornecedores} fornecedores ·{' '}
-                    {p._count.documentos} documentos
+                    {RESUMO.filter(([chave]) => p.contagens[chave])
+                      .map(([chave, rotulo]) => `${p.contagens[chave]} ${rotulo}`)
+                      .join(' · ') || 'sem sub-registros'}
                   </span>
                 </div>
                 <a className="btn-ghost" href={`/api/processos/${p.id}/relatorio`}>
