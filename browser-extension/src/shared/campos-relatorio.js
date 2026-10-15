@@ -285,7 +285,7 @@ function formatarPeriodo(inicio, fim) {
   return ''
 }
 
-function formatarChave(chave) {
+export function formatarChave(chave) {
   return chave.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/^./, (c) => c.toUpperCase())
 }
 
@@ -310,7 +310,7 @@ function pareceDataIso(v) {
 // - contratacao: { numeroTermo, ano, ... } -> "86/2025"
 // - tipoAditivo: { descricao, classificacao } -> "Aditivo de Prazo e Valor (Acréscimo)"
 // - arquivos: [{ nome, id, tipo }, ...] -> "arquivo1.pdf, arquivo2.pdf"
-function valorTexto(v) {
+export function valorTexto(v) {
   if (v == null) return ''
   if (pareceDataIso(v)) {
     const d = new Date(v)
@@ -388,7 +388,7 @@ function valorSolicitacaoFornecimento(valor) {
     .join(', ')
 }
 
-function valorCampoDinamico(chave, valor) {
+export function valorCampoDinamico(chave, valor) {
   if (ehChaveSolicitacaoFornecimento(chave) && valor != null) {
     return valorSolicitacaoFornecimento(valor)
   }
@@ -403,14 +403,14 @@ function valorCampoDinamico(chave, valor) {
   return valorTexto(valor)
 }
 
-function formatarData(iso) {
+export function formatarData(iso) {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return String(iso)
   return formatarDataBr(d)
 }
 
-function formatarValor(v) {
+export function formatarValor(v) {
   if (v == null) return ''
   const n = Number(v)
   if (Number.isNaN(n)) return String(v)

@@ -233,7 +233,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // (report.js, que roda numa página com DOM completo) monta o Blob e
   // dispara o download local a partir dos bytes já recebidos.
   if (message.type === 'baixar-anexo') {
-    baixarAnexo(message.arquivoId)
+    baixarAnexo(message.arquivoId, message.sistema)
       .then(sendResponse)
       .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
     return true
@@ -652,7 +652,12 @@ async function getCompras(sessao, caminho, params) {
 
 async function listarProcessos(sessao, filter) {
   const resp = await getCompras(sessao, ENDPOINT_PROCESSOS, { offset: '0', limit: '20', filter })
-  if (!resp.ok) throw new Error(`API do Betha Compras respondeu ${resp.status} ao buscar processos administrativos`)
+  if (!resp.ok) {
+    throw new Error(
+      `API do Betha Compras respondeu ${resp.status} ao buscar processos administrativos ` +
+        `(${baseApiCompras(sessao)}/${ENDPOINT_PROCESSOS}). Recarregue a página do Compras e tente de novo.`,
+    )
+  }
   const dados = await resp.json()
   return Array.isArray(dados) ? dados : dados.content || []
 }
@@ -806,7 +811,7 @@ function arrayBufferToBase64(buffer) {
 // demais endpoints — o objeto do anexo em si nunca traz uma URL pronta (só
 // id/nome/tipo/tamanho), por isso um `<a href>` direto sempre falharia sem
 // esses headers de autenticação.
-async function baixarAnexo(arquivoId) {
+async function baixarAnexo(arquivoId, sistema) {
   if (!arquivoId) return { erro: 'Anexo sem id para download.' }
   // Ids reais são UUID (ex.: "42b0df52-..."); qualquer coisa fora desse
   // formato é rejeitada antes de entrar na URL — defesa em profundidade
@@ -815,12 +820,23 @@ async function baixarAnexo(arquivoId) {
     return { erro: 'Id de anexo inválido.' }
   }
 
-  const headers = await resolverHeaders()
+  // Mesmo caminho `arquivos/{id}/conteudo` nos dois sistemas (confirmado ao
+  // vivo no projeto irmão Delta Intelligence, 2026-07-16); muda só a base e a
+  // sessão. `sistema: 'compras'` vem do relatório de processo administrativo.
+  const doCompras = sistema === 'compras'
+  const sessaoCompraDoAnexo = doCompras ? await resolverSessaoCompras() : null
+  const headers = doCompras ? sessaoCompraDoAnexo && sessaoCompraDoAnexo.headers : await resolverHeaders()
   if (!headers) {
-    return { erro: 'Sessão do Betha Contratos não capturada. Abra contratos.betha.cloud, faça login e tente de novo.' }
+    return {
+      erro: doCompras
+        ? 'Sessão do Betha Compras Cloud não capturada. Abra compras.betha.cloud, faça login e tente de novo.'
+        : 'Sessão do Betha Contratos não capturada. Abra contratos.betha.cloud, faça login e tente de novo.',
+    }
   }
 
-  const url = `https://${BETHA_CONTRATOS.apiHost}${BETHA_CONTRATOS.basePath}/arquivos/${arquivoId}/conteudo`
+  const url = doCompras
+    ? `${baseApiCompras(sessaoCompraDoAnexo)}/arquivos/${arquivoId}/conteudo`
+    : `https://${BETHA_CONTRATOS.apiHost}${BETHA_CONTRATOS.basePath}/arquivos/${arquivoId}/conteudo`
   let response
   try {
     response = await fetch(url, {

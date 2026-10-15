@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import ExcelJS from 'exceljs';
+import archiver from 'archiver';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
 import {
@@ -193,8 +194,54 @@ function preencherPlanilhaTabelaDinamica(planilha: ExcelJS.Worksheet, registros:
   }
 }
 
-// Um único .xlsx por processo: aba "Processo" (campo/valor) + uma aba por
-// sub-recurso que tenha registros.
+// Sub-recursos que viram uma aba dentro do Excel do próprio processo; os
+// demais (abaixo) viram um arquivo .xlsx próprio dentro do zip — mesmo
+// princípio do relatório de contrato (um documento por arquivo) e do PDF da
+// extensão (browser-extension/src/shared/pdf-relatorio-processo.js).
+const TIPOS_EM_ABA_DO_PROCESSO = ['itens', 'lotes', 'participantes', 'anexos'];
+
+// tipo -> nome usado no título do arquivo ("pareceres do processo 45/2026").
+const TIPOS_EM_ARQUIVO_PROPRIO: Record<string, string> = {
+  pareceres: 'pareceres',
+  sessoesjulgamento: 'sessões de julgamento',
+  atosfinais: 'atos finais',
+  despesas: 'despesas',
+  historico: 'histórico',
+  atas: 'atas de registro de preços',
+  textos: 'textos',
+};
+
+type ProcessoCompleto = NonNullable<Awaited<ReturnType<typeof buscarProcesso>>>;
+
+function tituloProcesso(processo: { numeroFormatado: string | null; idBetha: number }): string {
+  return `processo ${processo.numeroFormatado ?? `id ${processo.idBetha}`}`;
+}
+
+// Workbook do processo: aba "Processo" (campo/valor com todos os campos) +
+// uma aba por sub-recurso de TIPOS_EM_ABA_DO_PROCESSO que tenha registros.
+function workbookProcesso(processo: ProcessoCompleto): ExcelJS.Workbook {
+  const workbook = new ExcelJS.Workbook();
+  preencherPlanilhaCamposDinamicos(workbook.addWorksheet('Processo'), processo.dadosBrutos as Record<string, unknown>);
+
+  for (const tipo of TIPOS_EM_ABA_DO_PROCESSO) {
+    const registros = processo.subrecursos.filter((s) => s.tipo === tipo);
+    if (registros.length > 0) {
+      preencherPlanilhaTabelaDinamica(workbook.addWorksheet(TIPOS_SUBRECURSO[tipo].slice(0, 31)), registros);
+    }
+  }
+  return workbook;
+}
+
+// Workbook de UM sub-recurso: todos os registros numa tabela, com todas as
+// colunas que a API devolveu.
+function workbookSubrecurso(registros: Array<{ dadosBrutos: unknown }>, nomeAba: string): ExcelJS.Workbook {
+  const workbook = new ExcelJS.Workbook();
+  preencherPlanilhaTabelaDinamica(workbook.addWorksheet(nomeAba.slice(0, 31)), registros);
+  return workbook;
+}
+
+// .zip com um Excel por documento (o processo e cada sub-recurso com
+// registros) — mesmo formato do relatório de contrato.
 processosRouter.get('/:id/relatorio', async (req, res) => {
   const processo = await buscarProcesso(req.params.id);
   if (!processo) {
@@ -202,16 +249,24 @@ processosRouter.get('/:id/relatorio', async (req, res) => {
     return;
   }
 
-  const workbook = new ExcelJS.Workbook();
-  preencherPlanilhaCamposDinamicos(workbook.addWorksheet('Processo'), processo.dadosBrutos as Record<string, unknown>);
+  const titulo = tituloProcesso(processo);
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="${slug(titulo)}.zip"`);
 
-  for (const [tipo, nomeAba] of Object.entries(TIPOS_SUBRECURSO)) {
+  const arquivoZip = archiver('zip', { zlib: { level: 9 } });
+  // Erro no meio da escrita do zip (ex.: stream do cliente fechada) não pode
+  // virar exceção não tratada — derruba a resposta em vez de crashar o processo.
+  arquivoZip.on('error', (err) => res.destroy(err));
+  arquivoZip.pipe(res);
+
+  arquivoZip.append(await workbookParaBuffer(workbookProcesso(processo)), { name: `${slug(titulo)}.xlsx` });
+
+  for (const [tipo, rotulo] of Object.entries(TIPOS_EM_ARQUIVO_PROPRIO)) {
     const registros = processo.subrecursos.filter((s) => s.tipo === tipo);
-    if (registros.length > 0) preencherPlanilhaTabelaDinamica(workbook.addWorksheet(nomeAba.slice(0, 31)), registros);
+    if (registros.length === 0) continue;
+    const buffer = await workbookParaBuffer(workbookSubrecurso(registros, TIPOS_SUBRECURSO[tipo]));
+    arquivoZip.append(buffer, { name: `${slug(`${rotulo} do ${titulo}`)}.xlsx` });
   }
 
-  const nomeArquivo = slug(`processo ${processo.numeroFormatado ?? `id ${processo.idBetha}`}`);
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}.xlsx"`);
-  res.send(await workbookParaBuffer(workbook));
+  await arquivoZip.finalize();
 });

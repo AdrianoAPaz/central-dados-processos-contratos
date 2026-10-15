@@ -63,8 +63,11 @@ administrativo (Compras Cloud) — Número/Ano**, disponível também dentro de 
 (ícone no menu superior, igual ao Contratos). Ela busca o processo (`processosadministrativo`) e seus
 sub-recursos (itens, lotes, participantes, despesas, sessões de julgamento, pareceres, atos finais,
 histórico, textos, atas e anexos) usando a sua sessão logada e envia para `POST /api/processos`; a
-página **Processos administrativos** do frontend lista o que foi enviado e baixa o relatório em
-Excel (`GET /api/processos/:id/relatorio`).
+página **Processos administrativos** do frontend lista o que foi enviado e baixa os relatórios em
+`.zip` com um Excel por documento (`GET /api/processos/:id/relatorio`). Igual ao contrato, o botão **Gerar PDF** do
+popup abre uma página de relatório que gera um PDF por documento (o processo, com tabelas de itens, lotes e
+participantes, e um por sub-recurso: pareceres, sessões de julgamento, atos finais, despesas, histórico, atas e
+textos) e baixa tudo num único `.zip` junto com os anexos.
 
 Pra funcionar, abra `compras.betha.cloud`, faça login e navegue por qualquer tela (é assim que a
 extensão captura a sessão). **No Compras o ano do processo é o exercício da sessão**: o popup mostra

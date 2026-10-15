@@ -6,12 +6,11 @@
 // só ao Betha Contratos.
 ;(function () {
   // Este script roda tanto no Betha Contratos quanto no Betha Compras Cloud
-  // (ver manifest.json). No Contratos só interessa a API conhecida; no
-  // Compras o host da API ainda não foi confirmado ao vivo, então vale
-  // qualquer requisição pra *.betha.cloud — `extrairAuth` já exige os três
-  // headers de sessão do Betha, então só chamadas reais de API passam. A
-  // origem + prefixo `/.../api` observados vão junto, pra extensão não
-  // depender do palpite de constants.js (BETHA_COMPRAS).
+  // (ver manifest.json). Em cada um só interessa a API de dados do próprio
+  // sistema (api.contratos.betha.cloud / api.compras.betha.cloud);
+  // `extrairAuth` ainda exige os três headers de sessão do Betha. A origem +
+  // prefixo `/.../api` observados vão junto, pra extensão usar a URL que a
+  // própria página usa.
   const SISTEMA_DA_PAGINA = window.location.hostname === 'compras.betha.cloud' ? 'compras' : 'contratos'
 
   // Contexto (entidade + exercício) do Compras, na URL da própria página:
@@ -32,7 +31,11 @@
       if (SISTEMA_DA_PAGINA === 'contratos') {
         return u.hostname === 'api.contratos.betha.cloud' ? { sistema: 'contratos' } : null
       }
-      if (u.protocol !== 'https:' || !/(^|\.)betha\.cloud$/.test(u.hostname)) return null
+      // Só a API de dados do Compras: a página também fala com outros hosts do
+      // Betha (apigateway.betha.cloud, service.betha.cloud…) com os mesmos
+      // headers, e gravar a origem de um deles faz a busca ir pro serviço
+      // errado (404 em processosadministrativo).
+      if (u.protocol !== 'https:' || u.hostname !== 'api.compras.betha.cloud') return null
       const prefixo = u.pathname.match(/^(.*?\/api)(\/|$)/)
       return { sistema: 'compras', apiOrigin: u.origin, apiBasePath: prefixo ? prefixo[1] : '', contexto: contextoDaPagina() }
     } catch {

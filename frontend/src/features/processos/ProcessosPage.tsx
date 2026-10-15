@@ -84,7 +84,7 @@ export function ProcessosPage() {
                   </span>
                 </div>
                 <a className="btn-ghost" href={`/api/processos/${p.id}/relatorio`}>
-                  Baixar relatório (Excel)
+                  Baixar relatórios (.zip com Excel por documento)
                 </a>
               </li>
             ))}

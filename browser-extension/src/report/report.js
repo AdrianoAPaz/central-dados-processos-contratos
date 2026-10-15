@@ -9,53 +9,10 @@ import {
 } from '../shared/campos-relatorio.js'
 import { criarZip } from '../shared/zip.js'
 import { listarDocumentosRelatorio } from '../shared/pdf-relatorio.js'
+import { criarTabelaCampos, criarTabelaDinamica } from '../shared/dom-relatorio.js'
+import { nomeAnexo, nomeUnicoNoZip } from '../shared/pacote.js'
 
 const STORAGE_KEY = 'centralDados.relatorioAtual'
-
-function criarTabelaCampos(campos) {
-  const tabela = document.createElement('table')
-  for (const { label, valor } of campos) {
-    const tr = document.createElement('tr')
-    tr.innerHTML = `<td class="campo"></td><td class="valor"></td>`
-    tr.querySelector('.campo').textContent = label
-    tr.querySelector('.valor').textContent = valor || '—'
-    tabela.appendChild(tr)
-  }
-  return tabela
-}
-
-// Tabela de colunas dinâmicas (itens do contrato ou de um aditivo) — null se
-// não houver nenhuma linha (chamador decide o que mostrar nesse caso).
-function criarTabelaDinamica({ colunas, linhas }) {
-  if (!linhas.length) return null
-
-  const tabela = document.createElement('table')
-  tabela.className = 'tabela-itens'
-
-  const thead = document.createElement('thead')
-  const trCabecalho = document.createElement('tr')
-  for (const coluna of colunas) {
-    const th = document.createElement('th')
-    th.textContent = coluna
-    trCabecalho.appendChild(th)
-  }
-  thead.appendChild(trCabecalho)
-  tabela.appendChild(thead)
-
-  const tbody = document.createElement('tbody')
-  for (const linha of linhas) {
-    const tr = document.createElement('tr')
-    for (const valor of linha) {
-      const td = document.createElement('td')
-      td.textContent = valor || '—'
-      tr.appendChild(td)
-    }
-    tbody.appendChild(tr)
-  }
-  tabela.appendChild(tbody)
-
-  return tabela
-}
 
 // Anexos do contrato — `arquivos` é um array inline do próprio registro
 // (contrato e cada aditivo podem trazer o seu), nunca um sub-recurso à
@@ -71,31 +28,6 @@ function coletarAnexos(contrato) {
   const doTextos = (Array.isArray(contrato.anexosTextos) ? contrato.anexosTextos : []).map((a) => ({ ...a, origem: 'Textos' }))
   const daPublicacao = (Array.isArray(contrato.anexosPublicacao) ? contrato.anexosPublicacao : []).map((a) => ({ ...a, origem: 'Publicação' }))
   return [...doContrato, ...doAditivos, ...doTextos, ...daPublicacao].filter((a) => a && a.id)
-}
-
-function nomeAnexo(a) {
-  return a.nome || a.nomeArquivo || a.descricao || a.titulo || 'Anexo'
-}
-
-// Evita colisão de nome dentro do zip (dois anexos "edital.pdf" — um do
-// contrato, outro de um aditivo — sobrescreveriam um ao outro na extração
-// sem isto). Mantém o nome original na 1ª ocorrência.
-function nomeUnicoNoZip(nome, usados) {
-  if (!usados.has(nome)) {
-    usados.add(nome)
-    return nome
-  }
-  const pontoFinal = nome.lastIndexOf('.')
-  const base = pontoFinal > 0 ? nome.slice(0, pontoFinal) : nome
-  const extensao = pontoFinal > 0 ? nome.slice(pontoFinal) : ''
-  let n = 2
-  let candidato = `${base} (${n})${extensao}`
-  while (usados.has(candidato)) {
-    n += 1
-    candidato = `${base} (${n})${extensao}`
-  }
-  usados.add(candidato)
-  return candidato
 }
 
 function numeroContrato(contrato) {

@@ -418,39 +418,72 @@ function renderProcessos(lista, aproximado) {
     btnEnviar.addEventListener('click', () => enviarProcesso(p, btnEnviar))
     acoes.appendChild(btnEnviar)
 
+    const btnPdf = document.createElement('button')
+    btnPdf.className = 'btn btn-secundario'
+    btnPdf.innerHTML = `${ICONE_PDF}<span>Gerar PDF</span>`
+    btnPdf.addEventListener('click', () => gerarPdfProcesso(p, btnPdf))
+    acoes.appendChild(btnPdf)
+
     div.append(titulo, subtitulo, acoes)
     resultadoProcessoEl.appendChild(div)
   }
 }
 
-async function enviarProcesso(processo, botao) {
+// Processo + todos os sub-recursos (itens, lotes, participantes, pareceres,
+// histórico… e anexos) — buscado só quando o usuário age sobre UM processo
+// (enviar / gerar PDF), mesmo critério de `comDetalhes` nos contratos.
+async function carregarProcessoCompleto(processo) {
   mostrarMsg('Buscando itens, lotes, participantes, pareceres, histórico e demais dados do processo…', 'info')
+  const detalhes = await chrome.runtime.sendMessage({
+    type: 'buscar-detalhes-processo',
+    id: processo.id,
+    arquivos: processo.arquivos,
+  })
+  if (detalhes && detalhes.erro) throw new Error(detalhes.erro)
+  return {
+    avisos: detalhes.avisos || [],
+    processoCompleto: {
+      ...processo,
+      exercicio: contextoCompras.exercicio,
+      entidadeToken: contextoCompras.entidade,
+      subrecursos: detalhes.subrecursos,
+    },
+  }
+}
+
+async function enviarProcesso(processo, botao) {
   botao.disabled = true
   try {
-    const detalhes = await chrome.runtime.sendMessage({
-      type: 'buscar-detalhes-processo',
-      id: processo.id,
-      arquivos: processo.arquivos,
-    })
-    if (detalhes && detalhes.erro) throw new Error(detalhes.erro)
+    const { processoCompleto, avisos } = await carregarProcessoCompleto(processo)
 
     mostrarMsg('Enviando…', 'info')
-    const resp = await chrome.runtime.sendMessage({
-      type: 'enviar-processo-para-central',
-      processo: {
-        ...processo,
-        exercicio: contextoCompras.exercicio,
-        entidadeToken: contextoCompras.entidade,
-        subrecursos: detalhes.subrecursos,
-      },
-    })
+    const resp = await chrome.runtime.sendMessage({ type: 'enviar-processo-para-central', processo: processoCompleto })
     if (resp && resp.erro) {
       mostrarMsg(resp.erro, 'erro')
-    } else if (detalhes.avisos && detalhes.avisos.length) {
-      mostrarMsg(`Enviado, mas alguns dados não vieram: ${detalhes.avisos.join('; ')}.`, 'info')
+    } else if (avisos.length) {
+      mostrarMsg(`Enviado, mas alguns dados não vieram: ${avisos.join('; ')}.`, 'info')
     } else {
       mostrarMsg('Processo enviado com sucesso para a Central de Dados.', 'ok')
     }
+  } catch (e) {
+    mostrarMsg(String((e && e.message) || e), 'erro')
+  } finally {
+    botao.disabled = false
+  }
+}
+
+const CHAVE_RELATORIO_PROCESSO = 'centralDados.relatorioProcessoAtual'
+
+// Abre a página de relatório (src/report/processo.html) numa aba nova — ela lê
+// o processo salvo aqui, mostra a prévia e gera os PDFs + zip com os anexos,
+// igual ao "Gerar PDF" dos contratos.
+async function gerarPdfProcesso(processo, botao) {
+  botao.disabled = true
+  try {
+    const { processoCompleto, avisos } = await carregarProcessoCompleto(processo)
+    await chrome.storage.local.set({ [CHAVE_RELATORIO_PROCESSO]: processoCompleto })
+    await chrome.tabs.create({ url: chrome.runtime.getURL('src/report/processo.html') })
+    mostrarMsg(avisos.length ? `Relatório aberto, mas alguns dados não vieram: ${avisos.join('; ')}.` : '', avisos.length ? 'info' : '')
   } catch (e) {
     mostrarMsg(String((e && e.message) || e), 'erro')
   } finally {

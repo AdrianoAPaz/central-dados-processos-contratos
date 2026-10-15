@@ -31,7 +31,7 @@ function obterJsPDF() {
 // sem isto, um título ou tabela pequena podia nascer colada no fim da
 // página e "flutuar" sozinha na próxima, sem relação visual com o que vem
 // depois.
-function garantirEspaco(doc, cursor, alturaMinima) {
+export function garantirEspaco(doc, cursor, alturaMinima) {
   const alturaPagina = doc.internal.pageSize.getHeight()
   if (cursor + alturaMinima > alturaPagina - MARGEM) {
     doc.addPage()
@@ -40,7 +40,7 @@ function garantirEspaco(doc, cursor, alturaMinima) {
   return cursor
 }
 
-function desenharTitulo(doc, cursor, texto, tamanhoFonte) {
+export function desenharTitulo(doc, cursor, texto, tamanhoFonte) {
   cursor = garantirEspaco(doc, cursor, tamanhoFonte + 10)
   doc.setFontSize(tamanhoFonte)
   doc.setFont('helvetica', 'bold')
@@ -51,7 +51,7 @@ function desenharTitulo(doc, cursor, texto, tamanhoFonte) {
 
 // Tabela de 2 colunas (label/valor) — mesmo formato da tabela de campos do
 // contrato/aditivo/solicitação na tela.
-function desenharTabelaCampos(doc, cursor, campos) {
+export function desenharTabelaCampos(doc, cursor, campos) {
   doc.autoTable({
     startY: cursor,
     margin: { left: MARGEM, right: MARGEM },
@@ -64,7 +64,7 @@ function desenharTabelaCampos(doc, cursor, campos) {
 }
 
 // Tabela de colunas dinâmicas (itens do contrato ou de um aditivo).
-function desenharTabelaDinamica(doc, cursor, { colunas, linhas }) {
+export function desenharTabelaDinamica(doc, cursor, { colunas, linhas }) {
   if (!linhas.length) return cursor
   doc.autoTable({
     startY: cursor,
@@ -80,7 +80,7 @@ function desenharTabelaDinamica(doc, cursor, { colunas, linhas }) {
 // Cria um documento novo com o cabeçalho padrão (título do documento +
 // subtítulo institucional) — cada relatório (contrato/aditivo/solicitação) é
 // um jsPDF próprio, nunca compartilhado com os demais.
-function novoDocumento(titulo) {
+export function novoDocumento(titulo) {
   const jsPDF = obterJsPDF()
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
   let cursor = MARGEM
@@ -188,7 +188,7 @@ export function gerarPdfRecebimentos(secao) {
 // Nome de arquivo a partir da descrição do documento (ex.: "aditivo 1" ->
 // "aditivo-1") — sem acento, minúsculo, só letras/números separados por
 // hífen.
-function slug(texto) {
+export function slug(texto) {
   return texto
     .normalize('NFD')
     .replace(/\p{Mn}/gu, '')
