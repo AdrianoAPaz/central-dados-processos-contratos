@@ -8,9 +8,6 @@ const buscarTextoEl = document.getElementById('buscarTexto')
 const statusComprasEl = document.getElementById('statusCompras')
 const statusComprasTextoEl = document.getElementById('statusComprasTexto')
 const resultadoProcessoEl = document.getElementById('resultadoProcesso')
-const buscarProcessoBtn = document.getElementById('buscarProcesso')
-const buscarProcessoIconeEl = document.getElementById('buscarProcessoIcone')
-const buscarProcessoTextoEl = document.getElementById('buscarProcessoTexto')
 
 const ICONE_ENVIAR = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg>`
 const ICONE_PDF = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 20h16"/></svg>`
@@ -341,30 +338,19 @@ async function gerarPdf(contrato, botao) {
   }
 }
 
-buscarBtn.addEventListener('click', async () => {
-  mostrarMsg('', '')
+async function buscarContratos() {
   resultadoEl.innerHTML = ''
-  buscarBtn.disabled = true
-  buscarIconeEl.innerHTML = ICONE_SPINNER
-  buscarTextoEl.textContent = 'Buscando…'
-
   const sequencial = document.getElementById('sequencial').value.trim()
   const numeroAno = document.getElementById('numero').value.trim()
   const [numero, ano] = numeroAno.split('/')
 
-  try {
-    const resp = await chrome.runtime.sendMessage({ type: 'buscar-contrato', sequencial, numero, ano })
-    if (resp && resp.erro) {
-      mostrarMsg(resp.erro, 'erro')
-      return
-    }
-    renderCandidatos(resp.candidatos || [])
-  } finally {
-    buscarIconeEl.innerHTML = ICONE_BUSCA
-    buscarTextoEl.textContent = 'Buscar'
-    buscarBtn.disabled = false
+  const resp = await chrome.runtime.sendMessage({ type: 'buscar-contrato', sequencial, numero, ano })
+  if (resp && resp.erro) {
+    mostrarMsg(resp.erro, 'erro')
+    return
   }
-})
+  renderCandidatos(resp.candidatos || [])
+}
 
 // ---------------------------------------------------------------------------
 // Processo administrativo (Betha Compras Cloud) — ver service-worker.js
@@ -491,29 +477,44 @@ async function gerarPdfProcesso(processo, botao) {
   }
 }
 
-const ICONE_BUSCA_PROCESSO = buscarProcessoIconeEl.innerHTML
-
-buscarProcessoBtn.addEventListener('click', async () => {
-  mostrarMsg('', '')
+async function buscarProcessos() {
   resultadoProcessoEl.innerHTML = ''
-  buscarProcessoBtn.disabled = true
-  buscarProcessoIconeEl.innerHTML = ICONE_SPINNER
-  buscarProcessoTextoEl.textContent = 'Buscando…'
-
   const [numero, ano] = document.getElementById('processo').value.trim().split('/')
 
+  const resp = await chrome.runtime.sendMessage({ type: 'buscar-processo', numero, ano })
+  if (resp && resp.erro) {
+    mostrarMsg(resp.erro, 'erro')
+    return
+  }
+  contextoCompras = resp.contexto || contextoCompras
+  renderProcessos(resp.candidatos || [], resp.aproximado)
+}
+
+// Botão único de busca: consulta o Betha Contratos (sequencial e/ou número do
+// contrato) e o Compras Cloud (processo administrativo) conforme os campos
+// preenchidos. Com tudo em branco, mantém o comportamento anterior (busca de
+// contrato, que devolve o aviso de campos obrigatórios).
+buscarBtn.addEventListener('click', async () => {
+  mostrarMsg('', '')
+  resultadoEl.innerHTML = ''
+  resultadoProcessoEl.innerHTML = ''
+  buscarBtn.disabled = true
+  buscarIconeEl.innerHTML = ICONE_SPINNER
+  buscarTextoEl.textContent = 'Buscando…'
+
+  const temProcesso = Boolean(document.getElementById('processo').value.trim())
+  const temContrato = Boolean(
+    document.getElementById('sequencial').value.trim() || document.getElementById('numero').value.trim(),
+  )
+
   try {
-    const resp = await chrome.runtime.sendMessage({ type: 'buscar-processo', numero, ano })
-    if (resp && resp.erro) {
-      mostrarMsg(resp.erro, 'erro')
-      return
-    }
-    contextoCompras = resp.contexto || contextoCompras
-    renderProcessos(resp.candidatos || [], resp.aproximado)
+    // Em sequência (não em paralelo): ambas escrevem na mesma área de mensagem.
+    if (temContrato || !temProcesso) await buscarContratos()
+    if (temProcesso) await buscarProcessos()
   } finally {
-    buscarProcessoIconeEl.innerHTML = ICONE_BUSCA_PROCESSO
-    buscarProcessoTextoEl.textContent = 'Buscar processo'
-    buscarProcessoBtn.disabled = false
+    buscarIconeEl.innerHTML = ICONE_BUSCA
+    buscarTextoEl.textContent = 'Buscar'
+    buscarBtn.disabled = false
   }
 })
 

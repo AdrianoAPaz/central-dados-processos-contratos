@@ -737,6 +737,35 @@ async function coletarAnexosProcesso(sessao, processoId, arquivosInline, textos)
   return anexos
 }
 
+// Nome exibível de um participante (fornecedor) — o catálogo do sub-recurso
+// não foi mapeado, então tenta os lugares usuais do Betha.
+function nomeParticipante(participante) {
+  const p = participante || {}
+  const pessoa = p.pessoa || p.fornecedor || {}
+  return String(pessoa.nome || p.nome || p.razaoSocial || pessoa.razaoSocial || '')
+}
+
+// Propostas de cada participante — `participantes/{id}/propostas`, um
+// participante por vez (mesma cautela contra rajada). Cada proposta volta
+// marcada com `participanteId`/`participanteNome` pra o relatório (e o Excel
+// da Central) ligarem a proposta ao participante. Participante sem proposta
+// (404/400) simplesmente não gera registro.
+async function buscarPropostasParticipantes(sessao, processoId, participantes) {
+  const propostas = []
+  for (const participante of participantes) {
+    if (!participante || participante.id == null) continue
+    const registros = await buscarSubrecursoProcesso(
+      sessao,
+      processoId,
+      `participantes/${limparId(participante.id)}/propostas`,
+    )
+    for (const proposta of registros) {
+      propostas.push({ ...proposta, participanteId: participante.id, participanteNome: nomeParticipante(participante) })
+    }
+  }
+  return propostas
+}
+
 // Todos os sub-recursos de um processo — um por vez (mesma cautela contra
 // rajada dos demais). Falha em UM sub-recurso (ex.: 403/500) não derruba os
 // outros: vira aviso. Devolve `{ subrecursos: { <tipo>: [...] }, avisos }`.
@@ -752,6 +781,13 @@ async function buscarDetalhesProcesso(processoId, arquivosInline) {
       subrecursos[tipo] = []
       avisos.push(`${tipo}: ${String((e && e.message) || e)}`)
     }
+  }
+
+  try {
+    subrecursos.propostas = await buscarPropostasParticipantes(sessao, processoId, subrecursos.participantes || [])
+  } catch (e) {
+    subrecursos.propostas = []
+    avisos.push(`propostas: ${String((e && e.message) || e)}`)
   }
 
   try {

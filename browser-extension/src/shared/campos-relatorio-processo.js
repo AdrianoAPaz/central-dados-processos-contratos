@@ -185,11 +185,61 @@ export function montarTabelaGenerica(registros, excluir = []) {
   }
 }
 
+function camposDe(raw, ocultar = []) {
+  return Object.entries(raw || {})
+    .filter(([chave]) => !ocultar.includes(chave))
+    .map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorProcesso(chave, valor) }))
+}
+
+function nomeParticipante(raw) {
+  const r = raw || {}
+  const pessoa = r.pessoa || r.fornecedor || {}
+  return String(pessoa.nome || r.nome || r.razaoSocial || pessoa.razaoSocial || '')
+}
+
+// Documento só com os participantes do processo: um bloco por participante
+// (todos os campos) seguido de um bloco por proposta dele — as propostas vêm
+// de `subrecursos.propostas`, marcadas com `participanteId` pelo service worker
+// (ver buscarPropostasParticipantes). Devolve null sem participantes.
+export function montarDocumentoParticipantes(p) {
+  const participantes = subrecurso(p, 'participantes')
+  if (!participantes.length) return null
+
+  const propostas = subrecurso(p, 'propostas')
+  const blocos = []
+  participantes.forEach((raw, index) => {
+    const nome = nomeParticipante(raw)
+    const rotulo = nome ? `participante ${index + 1} — ${nome}` : `participante ${index + 1}`
+    blocos.push({ titulo: rotulo, campos: camposDe(raw) })
+
+    const dele = propostas.filter((proposta) => raw && proposta.participanteId === raw.id)
+    if (!dele.length) {
+      blocos.push({ titulo: `proposta do participante ${index + 1}`, campos: [{ label: 'Proposta', valor: 'Nenhuma proposta encontrada' }] })
+    }
+    dele.forEach((proposta, i) => {
+      const sufixo = dele.length > 1 ? ` (${i + 1}/${dele.length})` : ''
+      blocos.push({
+        titulo: `proposta do participante ${index + 1}${sufixo}`,
+        campos: camposDe(proposta, ['participanteId', 'participanteNome']),
+      })
+    })
+  })
+
+  return { chave: 'participantes', titulo: `participantes do ${tituloProcesso(p)}`, blocos }
+}
+
 // Um documento por sub-recurso em `SUBRECURSOS_EM_DOCUMENTO` que tenha
 // registros: cada registro vira um bloco com TODOS os campos que a API
-// devolveu. Devolve [{ titulo, blocos: [{ titulo, campos }] }].
+// devolveu. Devolve [{ titulo, blocos: [{ titulo, campos }] }]. O primeiro é o
+// dos participantes (com as propostas), quando houver.
 export function montarDocumentosSubrecursos(p) {
   const base = tituloProcesso(p)
+  const participantes = montarDocumentoParticipantes(p)
+  const demais = montarDocumentosDemais(p, base)
+  return participantes ? [participantes, ...demais] : demais
+}
+
+function montarDocumentosDemais(p, base) {
   return SUBRECURSOS_EM_DOCUMENTO.map(({ chave, rotulo, singular }) => ({ chave, registros: subrecurso(p, chave), rotulo, singular }))
     .filter(({ registros }) => registros.length)
     .map(({ registros, rotulo, singular }) => ({

@@ -21,6 +21,7 @@ const TIPOS_SUBRECURSO: Record<string, string> = {
   itens: 'Itens',
   lotes: 'Lotes',
   participantes: 'Participantes',
+  propostas: 'Propostas',
   despesas: 'Despesas',
   sessoesjulgamento: 'Sessões de julgamento',
   pareceres: 'Pareceres',
@@ -240,6 +241,23 @@ function workbookSubrecurso(registros: Array<{ dadosBrutos: unknown }>, nomeAba:
   return workbook;
 }
 
+// Workbook só dos participantes: aba "Participantes" e, ao lado, a aba
+// "Propostas" (uma linha por proposta, com `participanteId`/`participanteNome`
+// pra ligar cada proposta ao seu participante).
+function workbookParticipantes(processo: ProcessoCompleto): ExcelJS.Workbook | null {
+  const participantes = processo.subrecursos.filter((s) => s.tipo === 'participantes');
+  if (participantes.length === 0) return null;
+
+  const workbook = new ExcelJS.Workbook();
+  preencherPlanilhaTabelaDinamica(workbook.addWorksheet(TIPOS_SUBRECURSO.participantes), participantes);
+
+  const propostas = processo.subrecursos.filter((s) => s.tipo === 'propostas');
+  if (propostas.length > 0) {
+    preencherPlanilhaTabelaDinamica(workbook.addWorksheet(TIPOS_SUBRECURSO.propostas), propostas);
+  }
+  return workbook;
+}
+
 // .zip com um Excel por documento (o processo e cada sub-recurso com
 // registros) — mesmo formato do relatório de contrato.
 processosRouter.get('/:id/relatorio', async (req, res) => {
@@ -260,6 +278,13 @@ processosRouter.get('/:id/relatorio', async (req, res) => {
   arquivoZip.pipe(res);
 
   arquivoZip.append(await workbookParaBuffer(workbookProcesso(processo)), { name: `${slug(titulo)}.xlsx` });
+
+  const workbookDosParticipantes = workbookParticipantes(processo);
+  if (workbookDosParticipantes) {
+    arquivoZip.append(await workbookParaBuffer(workbookDosParticipantes), {
+      name: `${slug(`participantes do ${titulo}`)}.xlsx`,
+    });
+  }
 
   for (const [tipo, rotulo] of Object.entries(TIPOS_EM_ARQUIVO_PROPRIO)) {
     const registros = processo.subrecursos.filter((s) => s.tipo === tipo);

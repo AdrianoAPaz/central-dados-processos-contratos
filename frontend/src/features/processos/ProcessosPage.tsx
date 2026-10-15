@@ -19,6 +19,7 @@ const RESUMO: Array<[string, string]> = [
   ['itens', 'itens'],
   ['lotes', 'lotes'],
   ['participantes', 'participantes'],
+  ['propostas', 'propostas'],
   ['pareceres', 'pareceres'],
   ['sessoesjulgamento', 'sessões de julgamento'],
   ['anexos', 'anexos'],

@@ -98,7 +98,6 @@
   }
 
   .status + .status { margin-top: -8px; }
-  .card-processo { margin-top: 14px; }
 
   .campo { margin-bottom: 10px; }
   .campo:last-of-type { margin-bottom: 0; }
@@ -267,12 +266,16 @@
 
     <div class="card">
       <div class="campo">
-        <label for="sequencial">Sequencial (exato, opcional)</label>
+        <label for="sequencial">Sequencial da contratação</label>
         <input id="sequencial" type="text" placeholder="ex.: 104533" />
       </div>
       <div class="campo">
         <label for="numero">Número/Ano do contrato</label>
         <input id="numero" type="text" placeholder="ex.: 117/2026" />
+      </div>
+      <div class="campo">
+        <label for="processo">Processo administrativo (Compras Cloud) — Número/Ano</label>
+        <input id="processo" type="text" placeholder="ex.: 45/2026" />
       </div>
       <button id="buscar" class="btn btn-primario">
         <span id="buscarIcone">
@@ -285,22 +288,6 @@
     </div>
 
     <div id="resultado" class="resultado"></div>
-
-    <div class="card card-processo">
-      <div class="campo">
-        <label for="processo">Processo administrativo (Compras Cloud) — Número/Ano</label>
-        <input id="processo" type="text" placeholder="ex.: 45/2026" />
-      </div>
-      <button id="buscarProcesso" class="btn btn-primario">
-        <span id="buscarProcessoIcone">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>
-          </svg>
-        </span>
-        <span id="buscarProcessoTexto">Buscar processo</span>
-      </button>
-    </div>
-
     <div id="resultadoProcesso" class="resultado"></div>
     <div id="msg" class="msg"></div>
   </div>
