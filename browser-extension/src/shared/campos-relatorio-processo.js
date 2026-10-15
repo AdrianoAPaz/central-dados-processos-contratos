@@ -24,9 +24,28 @@ function valorProcesso(chave, valor) {
   return valorCampoDinamico(chave, valor)
 }
 
+// Colunas que não entram na tabela de itens (pedido do usuário). Comparadas
+// sem acento/caixa e sem separadores, então valem para `especificacao`,
+// `Especificação` etc. `diferencaDespesa…` cobre o campo
+// "Diferença Despesa Entidade Participante".
+const COLUNAS_ITENS_EXCLUIDAS = ['especificacao', 'amostra', 'configuracao', 'criteriodesempate', 'diferencadespesa']
+
+function normalizarChave(chave) {
+  return String(chave)
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase()
+}
+
+function chaveExcluida(chave, excluir) {
+  const n = normalizarChave(chave)
+  return excluir.some((prefixo) => n.startsWith(prefixo))
+}
+
 // Sub-recursos que viram TABELA dentro do PDF/relatório do próprio processo.
 export const SUBRECURSOS_EM_TABELA = [
-  { chave: 'itens', rotulo: 'Itens' },
+  { chave: 'itens', rotulo: 'Itens', excluir: COLUNAS_ITENS_EXCLUIDAS },
   { chave: 'lotes', rotulo: 'Lotes' },
   { chave: 'participantes', rotulo: 'Participantes' },
 ]
@@ -139,13 +158,13 @@ function ehChaveMonetaria(chave) {
 // (preferidas primeiro, depois as demais na ordem em que aparecem).
 // `omitidas` diz quantas colunas ficaram de fora, pro PDF avisar que o Excel
 // tem o resto.
-export function montarTabelaGenerica(registros) {
+export function montarTabelaGenerica(registros, excluir = []) {
   if (!Array.isArray(registros) || !registros.length) return { colunas: [], linhas: [], omitidas: 0 }
 
   const presentes = []
   for (const raw of registros) {
     for (const chave of Object.keys(raw || {})) {
-      if (!ehChaveInterna(chave) && !presentes.includes(chave)) presentes.push(chave)
+      if (!ehChaveInterna(chave) && !chaveExcluida(chave, excluir) && !presentes.includes(chave)) presentes.push(chave)
     }
   }
 

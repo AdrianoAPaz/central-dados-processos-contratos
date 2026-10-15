@@ -104,9 +104,9 @@ async function carregar() {
 
   // Itens, lotes e participantes — tabelas logo abaixo dos dados do processo.
   const containerTabelas = document.getElementById('tabelas')
-  for (const { chave, rotulo } of SUBRECURSOS_EM_TABELA) {
+  for (const { chave, rotulo, excluir } of SUBRECURSOS_EM_TABELA) {
     const registros = subrecurso(processo, chave)
-    const tabela = criarTabelaDinamica(montarTabelaGenerica(registros))
+    const tabela = criarTabelaDinamica(montarTabelaGenerica(registros, excluir))
     if (!tabela) continue
     const h2 = document.createElement('h2')
     h2.textContent = `${rotulo} (${registros.length})`
