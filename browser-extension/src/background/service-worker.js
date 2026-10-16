@@ -64,6 +64,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  // Contratações geradas pelo processo (ver buscarContratacoesDoProcesso).
+  if (message.type === 'buscar-contratacoes-do-processo') {
+    buscarContratacoesDoProcesso(message.numero, message.ano)
+      .then(sendResponse)
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
   if (message.type === 'buscar-contrato') {
     buscarContrato(message.sequencial, message.numero, message.ano)
       .then(sendResponse)
@@ -255,7 +263,10 @@ function montarAuthorization(auth) {
   return /^bearer\s/i.test(auth || '') ? auth : `Bearer ${auth}`
 }
 
-async function chamarBetha(filter) {
+// Uma página da listagem `contratacoes`. Devolve `{ registros, hasNext }`; em
+// erro HTTP lança um Error com `status` (quem chama decide se tenta outro
+// filtro, como em buscarContratacoesDoProcesso).
+async function listarContratacoes(filter, offset = 0, limit = 20) {
   const headers = await resolverHeaders()
   if (!headers) {
     throw new Error('Sessão do Betha Contratos não capturada. Abra contratos.betha.cloud, faça login e tente de novo.')
@@ -265,8 +276,8 @@ async function chamarBetha(filter) {
     ambienteContratacao: AMBIENTE_CONTRATACAO_TODAS,
     contratosDeOutrasEntidades: 'false',
     filter,
-    limit: '20',
-    offset: '0',
+    limit: String(limit),
+    offset: String(offset),
     sort: '',
     total: 'false',
   })
@@ -280,9 +291,96 @@ async function chamarBetha(filter) {
       'User-Access': headers.userAccess,
     },
   })
-  if (!resp.ok) throw new Error(`API do Betha respondeu ${resp.status}`)
+  if (!resp.ok) {
+    const erro = new Error(`API do Betha respondeu ${resp.status}`)
+    erro.status = resp.status
+    throw erro
+  }
   const dados = await resp.json()
-  return dados.content || []
+  const registros = Array.isArray(dados) ? dados : dados.content || []
+  return { registros, hasNext: !Array.isArray(dados) && !!dados.hasNext }
+}
+
+async function chamarBetha(filter) {
+  return (await listarContratacoes(filter)).registros
+}
+
+// Todas as páginas de um filtro, até `maximo` registros (`truncado` avisa que
+// havia mais). Uma página por vez, mesma cautela contra rajada dos demais.
+async function listarTodasContratacoes(filter, maximo) {
+  const PAGINA = 100
+  const registros = []
+  let offset = 0
+  let hasNext = true
+  while (hasNext && registros.length < maximo) {
+    const pagina = await listarContratacoes(filter, offset, PAGINA)
+    registros.push(...pagina.registros)
+    hasNext = pagina.hasNext && pagina.registros.length > 0
+    offset += PAGINA
+  }
+  return { registros, truncado: hasNext }
+}
+
+// A contratação aponta o processo de origem em `processoAdministrativo`
+// (`numero` e `ano`). Conferido sempre no cliente, sejam quais forem os
+// filtros usados na busca — é isto que garante que só volta o que é do processo.
+function pertenceAoProcesso(contratacao, numero, ano) {
+  const p = contratacao && contratacao.processoAdministrativo
+  if (!p || Number(p.numero) !== numero) return false
+  return !ano || Number(p.ano) === ano
+}
+
+// Contratações (contratos, atas, compras diretas…) geradas por um processo
+// administrativo do Compras. Nem o filtro por `processoAdministrativo` na API
+// do Contratos foi confirmado ao vivo (só `sequencial`, `numeroTermoNumerico` e
+// `ano` foram), então a busca tenta, em ordem:
+//   1. filtro no servidor pelos campos aninhados do processo — aceito se a API
+//      não recusar e as linhas devolvidas realmente forem do processo;
+//   2. varredura das contratações do ano do processo (e do seguinte, pois o
+//      contrato pode ser assinado no ano depois), filtrando no cliente.
+// Devolve `{ contratacoes, via, truncado }`; `via` diz qual caminho respondeu.
+async function buscarContratacoesDoProcesso(numeroBruto, anoBruto) {
+  const numero = Number(String(numeroBruto || '').replace(/\D/g, ''))
+  const ano = Number(String(anoBruto || '').replace(/\D/g, '')) || null
+  if (!numero) throw new Error('Número do processo administrativo inválido para buscar as contratações vinculadas.')
+
+  const MAXIMO_FILTRADO = 200
+  const MAXIMO_VARREDURA = 1500
+
+  const filtrosServidor = [
+    ano
+      ? `(((processoAdministrativo.numero = ${numero} and processoAdministrativo.ano = ${ano})))`
+      : `(((processoAdministrativo.numero = ${numero})))`,
+  ]
+  for (const filtro of filtrosServidor) {
+    let resultado
+    try {
+      resultado = await listarTodasContratacoes(filtro, MAXIMO_FILTRADO)
+    } catch (e) {
+      if (e && (e.status === 400 || e.status === 422)) continue
+      throw e
+    }
+    const vinculadas = resultado.registros.filter((c) => pertenceAoProcesso(c, numero, ano))
+    // Filtro honrado = tudo o que voltou é do processo (ou nada voltou: processo
+    // sem contratações). Qualquer linha de outro processo mostra que a API
+    // ignorou o filtro — o resultado seria parcial, então cai na varredura.
+    if (vinculadas.length === resultado.registros.length) {
+      return { contratacoes: vinculadas, via: 'filtro', truncado: resultado.truncado }
+    }
+  }
+
+  const anos = ano ? [ano, ano + 1] : ['']
+  const encontradas = new Map()
+  let truncado = false
+  for (const a of anos) {
+    const filtro = a === '' ? '' : `(((ano = ${a})))`
+    const resultado = await listarTodasContratacoes(filtro, MAXIMO_VARREDURA)
+    truncado = truncado || resultado.truncado
+    for (const c of resultado.registros) {
+      if (pertenceAoProcesso(c, numero, ano)) encontradas.set(c.sequencial ?? c.id, c)
+    }
+  }
+  return { contratacoes: [...encontradas.values()], via: 'varredura', truncado }
 }
 
 async function buscarContrato(sequencial, numero, ano) {

@@ -12,7 +12,10 @@ import { listarDocumentosRelatorio } from '../shared/pdf-relatorio.js'
 import { criarTabelaCampos, criarTabelaDinamica } from '../shared/dom-relatorio.js'
 import { nomeAnexo, nomeUnicoNoZip } from '../shared/pacote.js'
 
-const STORAGE_KEY = 'centralDados.relatorioAtual'
+// `?chave=` deixa o popup abrir vários relatórios de uma vez (contratações
+// vinculadas a um processo), cada um lendo o seu próprio contrato; sem ele,
+// vale a chave única do "Gerar PDF" de um contrato avulso.
+const STORAGE_KEY = new URLSearchParams(location.search).get('chave') || 'centralDados.relatorioAtual'
 
 // Anexos do contrato — `arquivos` é um array inline do próprio registro
 // (contrato e cada aditivo podem trazer o seu), nunca um sub-recurso à

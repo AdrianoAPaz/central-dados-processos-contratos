@@ -229,6 +229,23 @@
     gap: 6px;
   }
 
+  .opcao {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 14px;
+    padding: 8px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    background: #fff;
+    border: 1px solid var(--cor-borda);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .opcao[hidden] { display: none; }
+  .opcao input { margin: 2px 0 0; accent-color: var(--cor-primaria); flex-shrink: 0; }
+  .opcao + .resultado { margin-top: 8px; }
+
   .msg {
     display: flex;
     align-items: center;
@@ -270,11 +287,11 @@
         <input id="sequencial" type="text" placeholder="ex.: 104533" />
       </div>
       <div class="campo">
-        <label for="numero">Número/Ano do contrato</label>
+        <label for="numero">Contrato - Número/Ano</label>
         <input id="numero" type="text" placeholder="ex.: 117/2026" />
       </div>
       <div class="campo">
-        <label for="processo">Processo administrativo (Compras Cloud) — Número/Ano</label>
+        <label for="processo">Processo administrativo — Número/Ano</label>
         <input id="processo" type="text" placeholder="ex.: 45/2026" />
       </div>
       <button id="buscar" class="btn btn-primario">
@@ -288,6 +305,10 @@
     </div>
 
     <div id="resultado" class="resultado"></div>
+    <label id="opcoesProcesso" class="opcao" hidden>
+      <input id="incluirContratacoes" type="checkbox" />
+      <span>Gerar também as informações das contratações vinculadas ao processo</span>
+    </label>
     <div id="resultadoProcesso" class="resultado"></div>
     <div id="msg" class="msg"></div>
   </div>

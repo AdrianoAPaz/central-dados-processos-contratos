@@ -8,6 +8,8 @@ const buscarTextoEl = document.getElementById('buscarTexto')
 const statusComprasEl = document.getElementById('statusCompras')
 const statusComprasTextoEl = document.getElementById('statusComprasTexto')
 const resultadoProcessoEl = document.getElementById('resultadoProcesso')
+const opcoesProcessoEl = document.getElementById('opcoesProcesso')
+const incluirContratacoesEl = document.getElementById('incluirContratacoes')
 
 const ICONE_ENVIAR = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg>`
 const ICONE_PDF = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 20h16"/></svg>`
@@ -369,6 +371,8 @@ function renderProcessos(lista, aproximado) {
     resultadoProcessoEl.innerHTML = '<p class="vazio">Nenhum processo administrativo encontrado.</p>'
     return
   }
+  // Opção só aparece depois da busca, com processo na tela pra ela valer.
+  opcoesProcessoEl.hidden = false
   if (aproximado) {
     mostrarMsg('Nenhum processo com esse número exato — mostrando números parecidos.', 'info')
   }
@@ -437,19 +441,69 @@ async function carregarProcessoCompleto(processo) {
   }
 }
 
+// Contratações geradas pelo processo (contratos, atas, compras diretas…), cada
+// uma já com todos os detalhes (`comDetalhes`) — só busca se o usuário marcou
+// o checkbox. O vínculo é o `processoAdministrativo` (número + exercício) da
+// própria contratação; ver buscarContratacoesDoProcesso no service-worker.js.
+// Devolve `{ contratacoes, avisos }`; `avisos` são problemas não fatais.
+async function carregarContratacoesVinculadas(processo) {
+  if (!incluirContratacoesEl.checked) return { contratacoes: [], avisos: [] }
+
+  mostrarMsg('Buscando as contratações vinculadas ao processo…', 'info')
+  const resp = await chrome.runtime.sendMessage({
+    type: 'buscar-contratacoes-do-processo',
+    numero: processo.numeroProcesso,
+    ano: contextoCompras.exercicio,
+  })
+  if (resp && resp.erro) throw new Error(`Contratações vinculadas: ${resp.erro}`)
+
+  const avisos = []
+  const encontradas = resp.contratacoes || []
+  if (!encontradas.length) {
+    avisos.push('nenhuma contratação vinculada a este processo foi encontrada')
+  } else if (resp.via === 'varredura' && resp.truncado) {
+    avisos.push('a lista de contratações pode estar incompleta (limite de varredura atingido)')
+  }
+
+  const contratacoes = []
+  for (const [i, contratacao] of encontradas.entries()) {
+    mostrarMsg(`Buscando os dados da contratação ${i + 1} de ${encontradas.length}…`, 'info')
+    contratacoes.push(await comDetalhes(contratacao))
+  }
+  return { contratacoes, avisos }
+}
+
+function rotuloContratacao(c) {
+  return c.numeroTermo != null ? (c.ano ? `${c.numeroTermo}/${c.ano}` : String(c.numeroTermo)) : `Seq. ${c.sequencial}`
+}
+
 async function enviarProcesso(processo, botao) {
   botao.disabled = true
   try {
     const { processoCompleto, avisos } = await carregarProcessoCompleto(processo)
+    const vinculadas = await carregarContratacoesVinculadas(processo)
+    avisos.push(...vinculadas.avisos)
 
     mostrarMsg('Enviando…', 'info')
     const resp = await chrome.runtime.sendMessage({ type: 'enviar-processo-para-central', processo: processoCompleto })
     if (resp && resp.erro) {
       mostrarMsg(resp.erro, 'erro')
-    } else if (avisos.length) {
-      mostrarMsg(`Enviado, mas alguns dados não vieram: ${avisos.join('; ')}.`, 'info')
+      return
+    }
+
+    const falhas = []
+    for (const contratacao of vinculadas.contratacoes) {
+      const respContrato = await chrome.runtime.sendMessage({ type: 'enviar-para-central', contrato: contratacao })
+      if (respContrato && respContrato.erro) falhas.push(`contratação ${rotuloContratacao(contratacao)}: ${respContrato.erro}`)
+    }
+    avisos.push(...falhas)
+
+    const qtd = vinculadas.contratacoes.length - falhas.length
+    const sufixo = qtd > 0 ? ` e ${qtd} contratação(ões) vinculada(s)` : ''
+    if (avisos.length) {
+      mostrarMsg(`Processo${sufixo} enviado(s), mas: ${avisos.join('; ')}.`, 'info')
     } else {
-      mostrarMsg('Processo enviado com sucesso para a Central de Dados.', 'ok')
+      mostrarMsg(`Processo${sufixo} enviado(s) com sucesso para a Central de Dados.`, 'ok')
     }
   } catch (e) {
     mostrarMsg(String((e && e.message) || e), 'erro')
@@ -467,9 +521,23 @@ async function gerarPdfProcesso(processo, botao) {
   botao.disabled = true
   try {
     const { processoCompleto, avisos } = await carregarProcessoCompleto(processo)
+    const vinculadas = await carregarContratacoesVinculadas(processo)
+    avisos.push(...vinculadas.avisos)
+
     await chrome.storage.local.set({ [CHAVE_RELATORIO_PROCESSO]: processoCompleto })
     await chrome.tabs.create({ url: chrome.runtime.getURL('src/report/processo.html') })
-    mostrarMsg(avisos.length ? `Relatório aberto, mas alguns dados não vieram: ${avisos.join('; ')}.` : '', avisos.length ? 'info' : '')
+
+    // Um relatório de contrato por contratação vinculada, cada um numa aba com
+    // a sua própria chave de armazenamento (a aba consome a chave ao abrir).
+    for (const contratacao of vinculadas.contratacoes) {
+      const chave = `${CHAVE_RELATORIO}.${contratacao.sequencial ?? contratacao.id}`
+      await chrome.storage.local.set({ [chave]: contratacao })
+      await chrome.tabs.create({
+        url: `${chrome.runtime.getURL('src/report/report.html')}?chave=${encodeURIComponent(chave)}`,
+        active: false,
+      })
+    }
+    mostrarMsg(avisos.length ? `Relatório aberto, mas: ${avisos.join('; ')}.` : '', avisos.length ? 'info' : '')
   } catch (e) {
     mostrarMsg(String((e && e.message) || e), 'erro')
   } finally {
@@ -498,6 +566,7 @@ buscarBtn.addEventListener('click', async () => {
   mostrarMsg('', '')
   resultadoEl.innerHTML = ''
   resultadoProcessoEl.innerHTML = ''
+  opcoesProcessoEl.hidden = true
   buscarBtn.disabled = true
   buscarIconeEl.innerHTML = ICONE_SPINNER
   buscarTextoEl.textContent = 'Buscando…'
