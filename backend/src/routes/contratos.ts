@@ -561,6 +561,15 @@ function workbookContrato(contrato: NonNullable<Awaited<ReturnType<typeof buscar
   return workbook;
 }
 
+// Documento próprio só com os responsáveis do contrato — separado do
+// workbook do contrato (que mantém a aba "Responsáveis"), mesmo princípio dos
+// demais documentos (um assunto por arquivo).
+function workbookResponsaveis(responsaveis: Array<{ dadosBrutos: unknown }>): ExcelJS.Workbook {
+  const workbook = new ExcelJS.Workbook();
+  preencherPlanilhaResponsaveis(workbook.addWorksheet('Responsáveis'), responsaveis);
+  return workbook;
+}
+
 function workbookAditivo(aditivo: NonNullable<Awaited<ReturnType<typeof buscarContrato>>>['aditivos'][number]): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
   const planilha = workbook.addWorksheet('Aditivo');
@@ -654,6 +663,10 @@ function tituloContrato(contrato: { numeroFormatado: string | null; sequencial: 
   return `contrato ${numero}`;
 }
 
+function tituloResponsaveis(contrato: { numeroFormatado: string | null; sequencial: number }): string {
+  return `responsáveis do ${tituloContrato(contrato)}`;
+}
+
 function tituloAditivo(aditivo: { sequencial: number | null; ordem: number }): string {
   return `aditivo ${aditivo.sequencial ?? aditivo.ordem}`;
 }
@@ -719,6 +732,12 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
   arquivoZip.pipe(res);
 
   arquivoZip.append(await workbookParaBuffer(workbookContrato(contrato)), { name: `${nomeContrato}.xlsx` });
+
+  if (contrato.responsaveis.length > 0) {
+    arquivoZip.append(await workbookParaBuffer(workbookResponsaveis(contrato.responsaveis)), {
+      name: `${slug(tituloResponsaveis(contrato))}.xlsx`,
+    });
+  }
 
   for (const aditivo of contrato.aditivos) {
     const buffer = await workbookParaBuffer(workbookAditivo(aditivo));

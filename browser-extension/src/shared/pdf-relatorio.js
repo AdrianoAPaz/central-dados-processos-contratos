@@ -118,6 +118,18 @@ export function gerarPdfContrato(contrato) {
   return doc.output('blob')
 }
 
+// PDF só com os responsáveis do contrato (fiscal, gestor etc.): nome, tipo e
+// período de cada um. A seção também continua no PDF do contrato.
+export function gerarPdfResponsaveis(contrato) {
+  const { doc, cursor } = novoDocumento(tituloResponsaveis(contrato))
+  desenharTabelaDinamica(doc, cursor, montarTabelaResponsaveis(contrato.responsaveis))
+  return doc.output('blob')
+}
+
+function tituloResponsaveis(contrato) {
+  return `responsáveis do ${tituloContrato(contrato)}`
+}
+
 // PDF de UM aditivo (campos + itens vinculados a ele) — `secao` é uma
 // entrada de montarSecoesAditivos.
 export function gerarPdfAditivo(secao) {
@@ -198,12 +210,16 @@ export function slug(texto) {
 }
 
 // Lista os documentos a gerar pro relatório completo — um por contrato, um
-// por aditivo, um por solicitação de fornecimento — sem gerar os bytes ainda
+// só dos responsáveis, um por aditivo, um por solicitação de fornecimento — sem gerar os bytes ainda
 // (`gerar` é preguiçoso, pra quem consome poder tratar erro de um documento
 // sem derrubar os demais). Nome do arquivo é a própria descrição do
 // documento (ex.: "aditivo 1" -> "aditivo-1.pdf").
 export function listarDocumentosRelatorio(contrato) {
   const documentos = [{ nome: `${slug(tituloContrato(contrato))}.pdf`, gerar: () => gerarPdfContrato(contrato) }]
+
+  if (montarTabelaResponsaveis(contrato.responsaveis).linhas.length) {
+    documentos.push({ nome: `${slug(tituloResponsaveis(contrato))}.pdf`, gerar: () => gerarPdfResponsaveis(contrato) })
+  }
 
   for (const secao of montarSecoesAditivos(contrato.aditivos)) {
     documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfAditivo(secao) })
