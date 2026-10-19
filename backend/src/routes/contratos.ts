@@ -163,8 +163,9 @@ contratosRouter.post('/', async (req, res) => {
     : [];
   for (let i = 0; i < solicitacoesFornecimento.length; i++) {
     const raw = solicitacoesFornecimento[i];
-    const { recebimentos: recebimentosRaw, ...dadosSf } = raw;
+    const { recebimentos: recebimentosRaw, itens: itensSfRaw, ...dadosSf } = raw;
     const recebimentosDaSf = Array.isArray(recebimentosRaw) ? (recebimentosRaw as Record<string, unknown>[]) : [];
+    const itensDaSf = Array.isArray(itensSfRaw) ? (itensSfRaw as Record<string, unknown>[]) : [];
 
     const sfCriada = await prisma.solicitacaoFornecimento.create({
       data: {
@@ -173,6 +174,18 @@ contratosRouter.post('/', async (req, res) => {
         dadosBrutos: dadosSf as Prisma.InputJsonObject,
       },
     });
+
+    // Itens vinculados à solicitação (campo `itens`, buscado à parte pela
+    // extensão em .../solicitacoesfornecimento/{sfId}/itens).
+    if (itensDaSf.length) {
+      await prisma.itemSolicitacaoFornecimento.createMany({
+        data: itensDaSf.map((itemRaw, k) => ({
+          solicitacaoId: sfCriada.id,
+          ordem: k + 1,
+          dadosBrutos: itemRaw as Prisma.InputJsonObject,
+        })),
+      });
+    }
 
     // Itens de cada recebimento (o que efetivamente foi recebido do
     // catálogo) vêm aninhados dentro dele (campo `itens`, buscado à parte
@@ -393,6 +406,7 @@ function buscarContrato(id: string) {
       solicitacoesFornecimento: {
         orderBy: { ordem: 'asc' },
         include: {
+          itens: { orderBy: { ordem: 'asc' } },
           recebimentos: {
             orderBy: { ordem: 'asc' },
             include: { itens: { orderBy: { ordem: 'asc' } } },
@@ -632,6 +646,16 @@ function workbookSolicitacaoFornecimento(
   const workbook = new ExcelJS.Workbook();
   const planilha = workbook.addWorksheet('Solicitação de Fornecimento');
   preencherPlanilhaCamposDinamicos(planilha, solicitacao.dadosBrutos as Record<string, unknown>);
+
+  // Itens vinculados à solicitação — aba própria, mesmo princípio de
+  // workbookAditivo (aba "Aditivo" + aba "Itens").
+  if (solicitacao.itens.length > 0) {
+    preencherPlanilhaItens(
+      workbook.addWorksheet('Itens'),
+      null,
+      solicitacao.itens.map((item) => ({ __fixo: String(item.ordem), raw: item.dadosBrutos as Record<string, unknown> })),
+    );
+  }
   return workbook;
 }
 

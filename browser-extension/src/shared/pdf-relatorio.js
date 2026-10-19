@@ -151,11 +151,10 @@ export function gerarPdfAditivo(secao) {
 }
 
 // PDF de UMA solicitação de fornecimento (todos os campos que a API
-// devolveu) — `secao` é uma entrada de montarSecoesSolicitacoesFornecimento.
+// devolveu + itens vinculados a ela) — `secao` é uma entrada de
+// montarSecoesSolicitacoesFornecimento. Mesmo estilo de gerarPdfAditivo.
 export function gerarPdfSolicitacaoFornecimento(secao) {
-  const { doc, cursor: inicio } = novoDocumento(secao.titulo)
-  desenharTabelaCampos(doc, inicio, secao.campos)
-  return doc.output('blob')
+  return gerarPdfAditivo(secao)
 }
 
 // PDF de UMA interação contábil (todos os campos que a API devolveu) —

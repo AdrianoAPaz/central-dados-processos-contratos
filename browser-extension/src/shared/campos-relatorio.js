@@ -159,7 +159,10 @@ export function montarSecoesAditivos(aditivos) {
 // CAMPOS_ITEM). Já vem ordenada pela própria API (`sort: data desc`), não
 // reordenamos aqui. `numeroAno` já é o número formatado pelo próprio Betha
 // (ex.: "2373/2026") — confirmado no projeto irmão Delta Intelligence
-// (CONTEXTO_PROJETO.md §5).
+// (CONTEXTO_PROJETO.md §5). Os itens vinculados à solicitação viram uma
+// tabela própria logo abaixo dos campos (mesmas colunas fixas dos itens de
+// contrato/aditivo, ver montarTabelaItens); `itens` e `recebimentos` (este com
+// documento próprio, ver montarSecoesRecebimentos) não entram como campo.
 export function montarSecoesSolicitacoesFornecimento(solicitacoes) {
   if (!Array.isArray(solicitacoes) || !solicitacoes.length) return []
 
@@ -169,8 +172,10 @@ export function montarSecoesSolicitacoesFornecimento(solicitacoes) {
     // fornecimento 197/2026" pra solicitação 197 de 2026 (sem a palavra
     // "relatório").
     const titulo = `solicitação de fornecimento ${numero ?? index + 1}`
-    const campos = Object.entries(raw || {}).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor) }))
-    return { titulo, campos }
+    const { itens, recebimentos: _recebimentos, ...demaisCampos } = raw || {}
+    const campos = Object.entries(demaisCampos).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor) }))
+    const tabelaItens = montarTabelaItens(itens)
+    return { titulo, campos, tabelaItens }
   })
 }
 

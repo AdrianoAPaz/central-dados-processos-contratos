@@ -131,6 +131,18 @@ async function carregar() {
       bloco.appendChild(h3)
       bloco.appendChild(criarTabelaCampos(secao.campos))
 
+      // Itens vinculados a ESTA solicitação, logo abaixo dos dados dela — ou
+      // a mensagem explícita de que não há nenhum (mesmo estilo dos aditivos).
+      const tabelaItensSf = criarTabelaDinamica(secao.tabelaItens)
+      if (tabelaItensSf) {
+        bloco.appendChild(tabelaItensSf)
+      } else {
+        const semItens = document.createElement('p')
+        semItens.className = 'sem-itens'
+        semItens.textContent = `${secao.titulo} sem itens vinculados`
+        bloco.appendChild(semItens)
+      }
+
       container.appendChild(bloco)
     }
   }

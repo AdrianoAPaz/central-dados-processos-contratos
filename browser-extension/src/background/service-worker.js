@@ -133,6 +133,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  // Itens de UMA solicitação de fornecimento. Best-effort: caminho
+  // conjecturado no mesmo padrão dos recebimentos
+  // (`.../solicitacoesfornecimento/{sfId}/itens`), nunca confirmado ao vivo.
+  // 404/400 vira "sem itens vinculados" (ver buscarSubrecurso); se aparecer
+  // vazio onde a tela do Betha mostra itens, é o primeiro lugar a corrigir.
+  if (message.type === 'buscar-itens-solicitacao') {
+    buscarSubrecurso(
+      `${ENDPOINT_CONTRATACOES}/${limparId(message.contratoId)}/solicitacoesfornecimento/${limparId(message.solicitacaoId)}/itens`,
+    )
+      .then((itens) => sendResponse({ itens }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
   // Itens de UM recebimento específico. Endpoint confirmado ao vivo pelo
   // usuário (2026-09-17), ver buscarItensRecebimento abaixo.
   if (message.type === 'buscar-itens-recebimento') {

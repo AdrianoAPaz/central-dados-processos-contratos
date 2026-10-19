@@ -130,10 +130,32 @@ model SolicitacaoFornecimento {
   dadosBrutos Json     @map("dados_brutos")
   criadoEm    DateTime @default(now()) @map("criado_em")
 
+  itens        ItemSolicitacaoFornecimento[]
   recebimentos Recebimento[]
 
   @@unique([contratoId, ordem])
   @@map("solicitacao_fornecimento")
+}
+
+// Um item vinculado a UMA solicitação de fornecimento — buscado pela extensão
+// em `contratacoes/{id}/solicitacoesfornecimento/{sfId}/itens` (caminho ainda
+// não confirmado ao vivo, ver service-worker.js). Model próprio pelo mesmo
+// motivo de ItemRecebimento (não mexer na constraint única de `Item`); mesmo
+// catálogo de campos, extraído pelo relatório com as colunas fixas de
+// CAMPOS_ITEM. `itens` é removido do JSON da solicitação antes de gravar, pra
+// não duplicar o dado.
+model ItemSolicitacaoFornecimento {
+  id            String                  @id @default(cuid())
+  solicitacaoId String                  @map("solicitacao_id")
+  solicitacao   SolicitacaoFornecimento @relation(fields: [solicitacaoId], references: [id], onDelete: Cascade)
+
+  ordem Int
+
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  @@unique([solicitacaoId, ordem])
+  @@map("item_solicitacao_fornecimento")
 }
 
 // Um item do sub-recurso `contratacoes/{id}/solicitacoesfornecimento/{sfId}/

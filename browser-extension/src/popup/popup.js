@@ -251,6 +251,22 @@ async function enriquecerSequenciaisContratacao(interacoes, contrato) {
 // Busca só quando o usuário efetivamente age sobre UM contrato (enviar/gerar
 // PDF), evitando N+1 requisições pra cada candidato da lista. Itens de cada
 // aditivo (se existirem) vêm aninhados dentro do próprio aditivo.
+// Itens da solicitação de fornecimento em ordem crescente do número do item
+// (pedido do usuário, 2026-10-19). Mesmas chaves candidatas da coluna "Nº do
+// item" (CAMPOS_ITEM em campos-relatorio.js). Item sem número vai pro fim,
+// mantendo a ordem em que a API devolveu.
+function ordenarItensPorNumero(itens) {
+  const numeroDoItem = (raw) => {
+    const valor = raw && ['numero', 'numeroItem', 'item', 'ordem'].map((chave) => raw[chave]).find((v) => v != null)
+    const n = Number(valor)
+    return valor != null && valor !== '' && Number.isFinite(n) ? n : Infinity
+  }
+  return itens
+    .map((raw, indiceOriginal) => ({ raw, indiceOriginal, chave: numeroDoItem(raw) }))
+    .sort((a, b) => (a.chave === b.chave ? a.indiceOriginal - b.indiceOriginal : a.chave - b.chave))
+    .map((x) => x.raw)
+}
+
 async function comDetalhes(contrato) {
   if (contrato.id == null) return contrato
 
@@ -297,6 +313,21 @@ async function comDetalhes(contrato) {
   const solicitacoesComRecebimentos = await Promise.all(
     solicitacoes.map(async (sf) => {
       if (sf.id == null) return { ...sf, recebimentos: [] }
+
+      // Itens da solicitação — usa os que já vierem na listagem; senão busca o
+      // sub-recurso (caminho não confirmado ao vivo, ver service-worker.js).
+      // Best-effort: erro aqui vira "sem itens vinculados", não trava o
+      // relatório — mesmo critério dos itens de aditivo.
+      let itensSf = Array.isArray(sf.itens) && sf.itens.length ? sf.itens : null
+      if (!itensSf) {
+        const respItensSf = await chrome.runtime.sendMessage({
+          type: 'buscar-itens-solicitacao',
+          contratoId: contrato.id,
+          solicitacaoId: sf.id,
+        })
+        itensSf = (respItensSf && !respItensSf.erro && respItensSf.itens) || []
+      }
+
       const resp = await chrome.runtime.sendMessage({
         type: 'buscar-recebimentos',
         contratoId: contrato.id,
@@ -317,7 +348,7 @@ async function comDetalhes(contrato) {
           return { ...recebimento, itens: (respItens && respItens.itens) || [] }
         }),
       )
-      return { ...sf, recebimentos: recebimentosComItens }
+      return { ...sf, itens: ordenarItensPorNumero(itensSf), recebimentos: recebimentosComItens }
     }),
   )
 
