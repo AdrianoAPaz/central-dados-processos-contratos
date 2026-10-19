@@ -200,6 +200,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  // Cadastro completo de UM responsável a partir do id (ver
+  // buscarResponsavelContratos). Usado nos campos que vêm só com o id.
+  if (message.type === 'buscar-responsavel') {
+    buscarResponsavelContratos(message.id)
+      .then((responsavel) => sendResponse({ responsavel }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
   // Responsáveis do contrato (fiscal, gestor etc., com período de vigência).
   // Endpoint confirmado ao vivo pelo usuário (2026-09-17): GET
   // contratacoes/{id}/responsaveiscontratacao — diferente do que constava no
@@ -581,6 +590,54 @@ async function buscarSequencialContratacao(contratacaoId) {
   return contrato && contrato.sequencial != null ? contrato.sequencial : null
 }
 
+// Cadastro completo de um responsável (com `pessoa.nome`) a partir do id. Campos
+// como "Responsável autorização/rejeição" da solicitação de fornecimento vêm só
+// com o id; o registro está em `responsaveis/paginacao` (a tela usa esse
+// endpoint com `filter=(nome elike ...) or (cpf elike ...)`, pedido do usuário,
+// 2026-10-19). Tenta o filtro por id no servidor e, se a API recusar ou
+// ignorar, varre as páginas — sempre conferindo o id no cliente, porque o
+// filtro por id não foi confirmado ao vivo. Devolve null se não achar.
+async function buscarResponsavelContratos(responsavelId) {
+  const headers = await resolverHeaders()
+  if (!headers) {
+    throw new Error('Sessão do Betha Contratos não capturada. Abra contratos.betha.cloud, faça login e tente de novo.')
+  }
+  const alvo = String(responsavelId || '').replace(/\D/g, '')
+  if (!alvo) return null
+
+  const listar = async (filter, limit, offset) => {
+    const params = new URLSearchParams({ filter, limit: String(limit), offset: String(offset), sort: '' })
+    const resp = await fetch(`https://${BETHA_CONTRATOS.apiHost}${BETHA_CONTRATOS.basePath}/responsaveis/paginacao?${params}`, {
+      method: 'GET',
+      headers: {
+        Authorization: montarAuthorization(headers.authorization),
+        'App-Context': headers.appContext,
+        'User-Access': headers.userAccess,
+      },
+    })
+    if (!resp.ok) return null
+    const dados = await resp.json()
+    return Array.isArray(dados) ? { content: dados, hasNext: false } : dados
+  }
+  const achar = (pagina) => ((pagina && pagina.content) || []).find((r) => r && String(r.id) === alvo)
+
+  const exato = achar(await listar(`id = ${alvo}`, 20, 0))
+  if (exato) return exato
+
+  const PAGINA = 100
+  const MAX_VARREDURA = 1000
+  for (let offset = 0; offset < MAX_VARREDURA; ) {
+    const pagina = await listar('', PAGINA, offset)
+    if (!pagina) return null
+    const achado = achar(pagina)
+    if (achado) return achado
+    const recebidos = (pagina.content || []).length
+    if (!pagina.hasNext || !recebidos) break
+    offset += recebidos
+  }
+  return null
+}
+
 // Número da despesa (`despesa.numero`, ex.: 291) a partir do id interno
 // (`despesa.id`) usado dentro do `desdobramento` de uma interação contábil.
 // A "data" é exigida pelo endpoint (ele responde saldo NA data), mas não
@@ -886,12 +943,14 @@ async function buscarResponsavelCompras(sessao, id) {
   const exato = ((filtrado && filtrado.content) || []).find((r) => r && String(r.id) === alvo)
   if (exato) return exato
 
-  for (let offset = 0; offset < MAX_VARREDURA; offset += PAGINA) {
+  for (let offset = 0; offset < MAX_VARREDURA; ) {
     const pagina = await listar({ filter: '', limit: String(PAGINA), offset: String(offset) })
     if (!pagina) return null
     const achado = (pagina.content || []).find((r) => r && String(r.id) === alvo)
     if (achado) return achado
-    if (!pagina.hasNext || !(pagina.content || []).length) break
+    const recebidos = (pagina.content || []).length
+    if (!pagina.hasNext || !recebidos) break
+    offset += recebidos
   }
   return null
 }

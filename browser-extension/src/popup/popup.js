@@ -184,6 +184,38 @@ async function enriquecerDescricoesCadastros(registros) {
   return resultado
 }
 
+// Campos de responsável da solicitação de fornecimento (ex.: "Responsável
+// autorização/rejeição", `responsavelAutorizacaoRejeicao`) vêm só com o id, sem
+// nome (pedido do usuário, 2026-10-19) — o cadastro completo, com
+// `pessoa.nome`, está em `responsaveis/paginacao` (ver
+// buscarResponsavelContratos no service-worker.js). Valor pode ser o objeto
+// ({ id, pessoa: null… }) ou só o id. Uma busca por id, com cache — vários
+// registros costumam ter o mesmo responsável. Best-effort: se a busca falhar, o
+// campo fica como veio, sem travar o relatório.
+async function enriquecerResponsaveis(registros) {
+  const cache = new Map()
+  const resultado = []
+  for (const registro of registros) {
+    const enriquecido = { ...registro }
+    for (const chave of Object.keys(registro || {})) {
+      if (!/^responsavel/i.test(chave)) continue
+      const valor = registro[chave]
+      const id = idDoValor(valor)
+      const jaTemNome = valor && typeof valor === 'object' && (valor.pessoa || valor.nome)
+      if (id == null || jaTemNome) continue
+
+      if (!cache.has(id)) {
+        const resp = await chrome.runtime.sendMessage({ type: 'buscar-responsavel', id })
+        cache.set(id, resp && !resp.erro ? resp.responsavel : null)
+      }
+      const completo = cache.get(id)
+      if (completo) enriquecido[chave] = typeof valor === 'object' ? { ...valor, ...completo } : completo
+    }
+    resultado.push(enriquecido)
+  }
+  return resultado
+}
+
 // `contratacao` de cada interação contábil só traz o id interno da
 // contratação — o relatório mostra o sequencial dela (o mesmo do documento do
 // contrato; pedido do usuário, 2026-10-14). Quando o id é o do próprio
@@ -261,7 +293,7 @@ async function comDetalhes(contrato) {
   // buscado por cima de cada recebimento. Endpoints confirmados (ver
   // service-worker.js): erro em qualquer um interrompe o relatório, mesmo
   // critério das solicitações de fornecimento em si.
-  const solicitacoes = await enriquecerDescricoesCadastros(respSf.solicitacoes || [])
+  const solicitacoes = await enriquecerResponsaveis(await enriquecerDescricoesCadastros(respSf.solicitacoes || []))
   const solicitacoesComRecebimentos = await Promise.all(
     solicitacoes.map(async (sf) => {
       if (sf.id == null) return { ...sf, recebimentos: [] }
