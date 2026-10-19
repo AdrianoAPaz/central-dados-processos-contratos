@@ -10,51 +10,16 @@ import {
 import { criarZip } from '../shared/zip.js'
 import { listarDocumentosRelatorio } from '../shared/pdf-relatorio.js'
 import { criarTabelaCampos, criarTabelaDinamica } from '../shared/dom-relatorio.js'
-import { nomeAnexo, nomeUnicoNoZip } from '../shared/pacote.js'
+import { baixarBlob, coletarArquivosPacote } from '../shared/pacote.js'
+import { coletarAnexosContrato, nomeArquivoZipContrato, pastaAnexosContrato } from '../shared/pacote-contrato.js'
 
-// `?chave=` deixa o popup abrir vários relatórios de uma vez (contratações
-// vinculadas a um processo), cada um lendo o seu próprio contrato; sem ele,
-// vale a chave única do "Gerar PDF" de um contrato avulso.
-const STORAGE_KEY = new URLSearchParams(location.search).get('chave') || 'centralDados.relatorioAtual'
-
-// Anexos do contrato — `arquivos` é um array inline do próprio registro
-// (contrato e cada aditivo podem trazer o seu), nunca um sub-recurso à
-// parte; por isso já vêm dentro de `contrato` sem precisar de outra busca.
-// Confirmado no projeto irmão Delta Intelligence (CONTEXTO_PROJETO.md §5).
-function coletarAnexos(contrato) {
-  const doContrato = (Array.isArray(contrato.arquivos) ? contrato.arquivos : []).map((a) => ({ ...a, origem: 'Contrato' }))
-  const doAditivos = (Array.isArray(contrato.aditivos) ? contrato.aditivos : []).flatMap((aditivo, i) =>
-    (Array.isArray(aditivo.arquivos) ? aditivo.arquivos : []).map((a) => ({ ...a, origem: `Aditivo ${i + 1}` })),
-  )
-  // Documentos das janelas "Textos" e "Publicação" do contrato — buscados à
-  // parte (não vêm no campo inline `arquivos`, ver service-worker.js).
-  const doTextos = (Array.isArray(contrato.anexosTextos) ? contrato.anexosTextos : []).map((a) => ({ ...a, origem: 'Textos' }))
-  const daPublicacao = (Array.isArray(contrato.anexosPublicacao) ? contrato.anexosPublicacao : []).map((a) => ({ ...a, origem: 'Publicação' }))
-  return [...doContrato, ...doAditivos, ...doTextos, ...daPublicacao].filter((a) => a && a.id)
-}
-
-function numeroContrato(contrato) {
-  return contrato.numeroTermo != null
-    ? (contrato.ano ? `${contrato.numeroTermo}-${contrato.ano}` : String(contrato.numeroTermo))
-    : `seq-${contrato.sequencial ?? 'contrato'}`
-}
-
-function nomeArquivoZip(contrato) {
-  return `anexos-contrato-${numeroContrato(contrato)}.zip`
-}
-
-// Pasta dentro do zip que agrupa todos os anexos baixados — pedido do
-// usuário para separar melhor os documentos de cada contrato.
-function pastaAnexosNoZip(contrato) {
-  return `Anexos do contrato numero ${numeroContrato(contrato)}`
-}
+const STORAGE_KEY = 'centralDados.relatorioAtual'
 
 // Gera o PDF do relatório e baixa cada anexo via service worker (que tem a
 // sessão do Betha), agrupando tudo num único .zip (pedido do usuário — em
-// vez de um download separado por arquivo). Anexos sequenciais, não em
-// paralelo: rajada de requisições autenticadas de uma vez arrisca
-// rate-limit oculto no Betha (mesma cautela do Delta Intelligence para
-// POSTs em sequência).
+// vez de um download separado por arquivo). Um PDF por documento (contrato,
+// cada aditivo, cada solicitação de fornecimento) — pedido do usuário:
+// relatórios separados, não um único PDF juntando tudo.
 async function montarPacoteRelatorio(contrato, anexos, container) {
   const titulo = document.createElement('h2')
   titulo.textContent = 'Anexos e relatório em PDF'
@@ -64,60 +29,16 @@ async function montarPacoteRelatorio(contrato, anexos, container) {
   lista.className = 'lista-anexos'
   container.appendChild(lista)
 
-  const usados = new Set()
-  const baixados = []
-  const pasta = pastaAnexosNoZip(contrato)
-
-  // Um PDF por documento (contrato, cada aditivo, cada solicitação de
-  // fornecimento) — pedido do usuário: relatórios separados, não um único
-  // PDF juntando tudo. Cada um gera e falha independente dos demais.
-  for (const documento of listarDocumentosRelatorio(contrato)) {
-    const li = document.createElement('li')
-    li.textContent = `⏳ ${documento.nome}`
-    lista.appendChild(li)
-    try {
-      const pdfBlob = documento.gerar()
-      const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer())
-      baixados.push({ nome: nomeUnicoNoZip(documento.nome, usados), bytes: pdfBytes })
-      li.textContent = `✅ ${documento.nome}`
-    } catch (e) {
-      li.textContent = `⚠️ ${documento.nome} — erro: ${String((e && e.message) || e)}`
-    }
-  }
-
-  for (const anexo of anexos) {
-    const li = document.createElement('li')
-    li.textContent = `⏳ ${anexo.origem} — ${nomeAnexo(anexo)}`
-    lista.appendChild(li)
-
-    try {
-      const resp = await chrome.runtime.sendMessage({ type: 'baixar-anexo', arquivoId: anexo.id })
-      if (!resp || resp.erro || resp.success !== true || typeof resp.base64 !== 'string') {
-        li.textContent = `⚠️ ${anexo.origem} — ${nomeAnexo(anexo)} (falha: ${(resp && resp.erro) || 'sem retorno'})`
-        continue
-      }
-      const bin = atob(resp.base64)
-      const bytes = new Uint8Array(bin.length)
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-      baixados.push({ nome: `${pasta}/${nomeUnicoNoZip(nomeAnexo(anexo), usados)}`, bytes })
-      li.textContent = `✅ ${anexo.origem} — ${nomeAnexo(anexo)}`
-    } catch (e) {
-      li.textContent = `⚠️ ${anexo.origem} — ${nomeAnexo(anexo)} (erro: ${String((e && e.message) || e)})`
-    }
-  }
-
+  const baixados = await coletarArquivosPacote({
+    documentos: listarDocumentosRelatorio(contrato),
+    anexos,
+    pasta: pastaAnexosContrato(contrato),
+    lista,
+  })
   if (!baixados.length) return
 
-  const nomeZip = nomeArquivoZip(contrato)
-  const zipBlob = criarZip(baixados)
-  const objectUrl = URL.createObjectURL(zipBlob)
-  const link = document.createElement('a')
-  link.href = objectUrl
-  link.download = nomeZip
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 10000)
+  const nomeZip = nomeArquivoZipContrato(contrato)
+  baixarBlob(criarZip(baixados), nomeZip)
 
   const resumo = document.createElement('p')
   resumo.className = 'sem-itens'
@@ -286,7 +207,7 @@ async function carregar() {
   // Gera o PDF do relatório e baixa os anexos automaticamente ao abrir a
   // aba, agrupando tudo num único .zip — pedido do usuário: não precisa de
   // clique extra nem de downloads separados.
-  await montarPacoteRelatorio(contrato, coletarAnexos(contrato), document.getElementById('anexos'))
+  await montarPacoteRelatorio(contrato, coletarAnexosContrato(contrato), document.getElementById('anexos'))
 
   // Consumido uma vez — evita reabrir a mesma aba (ex.: F5) mostrando dados de
   // um relatório antigo por engano.

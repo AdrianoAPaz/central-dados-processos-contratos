@@ -13,7 +13,9 @@ import {
 import { criarZip } from '../shared/zip.js'
 import { listarDocumentosProcesso } from '../shared/pdf-relatorio-processo.js'
 import { criarTabelaCampos, criarTabelaDinamica } from '../shared/dom-relatorio.js'
-import { baixarBlob, base64ParaBytes, nomeAnexo, nomeUnicoNoZip } from '../shared/pacote.js'
+import { listarDocumentosRelatorio } from '../shared/pdf-relatorio.js'
+import { baixarBlob, coletarArquivosPacote, nomeUnicoNoZip } from '../shared/pacote.js'
+import { coletarAnexosContrato, numeroContrato, pastaAnexosContrato } from '../shared/pacote-contrato.js'
 
 const STORAGE_KEY = 'centralDados.relatorioProcessoAtual'
 
@@ -42,46 +44,42 @@ async function montarPacoteRelatorio(processo, anexos, container) {
   lista.className = 'lista-anexos'
   container.appendChild(lista)
 
-  const usados = new Set()
-  const baixados = []
-  const pasta = `Anexos do processo numero ${numeroParaArquivo(processo)}`
+  const numero = numeroParaArquivo(processo)
+  const contratacoes = Array.isArray(processo.contratacoesVinculadas) ? processo.contratacoesVinculadas : []
+  // Sem contratações vinculadas o zip continua só com os arquivos do processo,
+  // soltos na raiz. Com elas, o zip ganha duas pastas: a do processo e a de
+  // "Contratações" (uma subpasta por contratação, com os PDFs e anexos dela).
+  const prefixoProcesso = contratacoes.length ? `Processo administrativo numero ${numero}/` : ''
 
   // Um PDF por documento (o processo e cada sub-recurso com registros) — cada
   // um gera e falha independente dos demais.
-  for (const documento of listarDocumentosProcesso(processo)) {
-    const li = document.createElement('li')
-    li.textContent = `⏳ ${documento.nome}`
-    lista.appendChild(li)
-    try {
-      const pdfBlob = documento.gerar()
-      baixados.push({ nome: nomeUnicoNoZip(documento.nome, usados), bytes: new Uint8Array(await pdfBlob.arrayBuffer()) })
-      li.textContent = `✅ ${documento.nome}`
-    } catch (e) {
-      li.textContent = `⚠️ ${documento.nome} — erro: ${String((e && e.message) || e)}`
-    }
-  }
+  const baixados = await coletarArquivosPacote({
+    documentos: listarDocumentosProcesso(processo),
+    anexos,
+    prefixo: prefixoProcesso,
+    pasta: `Anexos do processo numero ${numero}`,
+    sistema: 'compras',
+    lista,
+  })
 
-  for (const anexo of anexos) {
-    const li = document.createElement('li')
-    li.textContent = `⏳ ${anexo.origem} — ${nomeAnexo(anexo)}`
-    lista.appendChild(li)
-
-    try {
-      const resp = await chrome.runtime.sendMessage({ type: 'baixar-anexo', arquivoId: anexo.id, sistema: 'compras' })
-      if (!resp || resp.erro || resp.success !== true || typeof resp.base64 !== 'string') {
-        li.textContent = `⚠️ ${anexo.origem} — ${nomeAnexo(anexo)} (falha: ${(resp && resp.erro) || 'sem retorno'})`
-        continue
-      }
-      baixados.push({ nome: `${pasta}/${nomeUnicoNoZip(nomeAnexo(anexo), usados)}`, bytes: base64ParaBytes(resp.base64) })
-      li.textContent = `✅ ${anexo.origem} — ${nomeAnexo(anexo)}`
-    } catch (e) {
-      li.textContent = `⚠️ ${anexo.origem} — ${nomeAnexo(anexo)} (erro: ${String((e && e.message) || e)})`
-    }
+  const pastasUsadas = new Set()
+  for (const contratacao of contratacoes) {
+    const nomePasta = nomeUnicoNoZip(`Contratação ${numeroContrato(contratacao)}`, pastasUsadas)
+    baixados.push(
+      ...(await coletarArquivosPacote({
+        documentos: listarDocumentosRelatorio(contratacao),
+        anexos: coletarAnexosContrato(contratacao),
+        prefixo: `Contratações/${nomePasta}/`,
+        pasta: pastaAnexosContrato(contratacao),
+        lista,
+        rotulo: `${nomePasta} — `,
+      })),
+    )
   }
 
   if (!baixados.length) return
 
-  const nomeZip = `anexos-processo-${numeroParaArquivo(processo)}.zip`
+  const nomeZip = contratacoes.length ? `processo-${numero}-com-contratacoes.zip` : `anexos-processo-${numero}.zip`
   baixarBlob(criarZip(baixados), nomeZip)
 
   const resumo = document.createElement('p')

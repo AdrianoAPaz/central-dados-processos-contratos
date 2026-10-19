@@ -516,7 +516,8 @@ const CHAVE_RELATORIO_PROCESSO = 'centralDados.relatorioProcessoAtual'
 
 // Abre a página de relatório (src/report/processo.html) numa aba nova — ela lê
 // o processo salvo aqui, mostra a prévia e gera os PDFs + zip com os anexos,
-// igual ao "Gerar PDF" dos contratos.
+// igual ao "Gerar PDF" dos contratos. Com o checkbox marcado, o mesmo zip
+// leva também as contratações vinculadas (pasta própria).
 async function gerarPdfProcesso(processo, botao) {
   botao.disabled = true
   try {
@@ -524,19 +525,12 @@ async function gerarPdfProcesso(processo, botao) {
     const vinculadas = await carregarContratacoesVinculadas(processo)
     avisos.push(...vinculadas.avisos)
 
-    await chrome.storage.local.set({ [CHAVE_RELATORIO_PROCESSO]: processoCompleto })
+    // As contratações vão junto do processo, numa aba só: a página monta um
+    // único zip com a pasta do processo e a pasta "Contratações".
+    await chrome.storage.local.set({
+      [CHAVE_RELATORIO_PROCESSO]: { ...processoCompleto, contratacoesVinculadas: vinculadas.contratacoes },
+    })
     await chrome.tabs.create({ url: chrome.runtime.getURL('src/report/processo.html') })
-
-    // Um relatório de contrato por contratação vinculada, cada um numa aba com
-    // a sua própria chave de armazenamento (a aba consome a chave ao abrir).
-    for (const contratacao of vinculadas.contratacoes) {
-      const chave = `${CHAVE_RELATORIO}.${contratacao.sequencial ?? contratacao.id}`
-      await chrome.storage.local.set({ [chave]: contratacao })
-      await chrome.tabs.create({
-        url: `${chrome.runtime.getURL('src/report/report.html')}?chave=${encodeURIComponent(chave)}`,
-        active: false,
-      })
-    }
     mostrarMsg(avisos.length ? `Relatório aberto, mas: ${avisos.join('; ')}.` : '', avisos.length ? 'info' : '')
   } catch (e) {
     mostrarMsg(String((e && e.message) || e), 'erro')

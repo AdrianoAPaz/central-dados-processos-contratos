@@ -33,6 +33,52 @@ export function base64ParaBytes(base64) {
   return bytes
 }
 
+// Gera o PDF de cada documento e baixa cada anexo (um de cada vez — rajada de
+// requisições autenticadas arrisca rate-limit oculto no Betha), devolvendo os
+// arquivos já com o caminho dentro do zip: PDFs em `prefixo`, anexos em
+// `prefixo + pasta/`. Cada um gera/falha independente dos demais e vira uma
+// linha em `lista` (<ul>); `rotulo` identifica de quem é a linha quando o zip
+// junta vários documentos (processo + contratações).
+//   documentos: [{ nome, gerar() }]   anexos: [{ id, origem, ...metadados }]
+//   sistema: 'compras' pros anexos do Compras (omitido = Betha Contratos).
+export async function coletarArquivosPacote({ documentos, anexos, prefixo = '', pasta, sistema, lista, rotulo = '' }) {
+  const usados = new Set()
+  const arquivos = []
+
+  for (const documento of documentos) {
+    const li = document.createElement('li')
+    li.textContent = `⏳ ${rotulo}${documento.nome}`
+    lista.appendChild(li)
+    try {
+      const pdfBlob = documento.gerar()
+      arquivos.push({ nome: `${prefixo}${nomeUnicoNoZip(documento.nome, usados)}`, bytes: new Uint8Array(await pdfBlob.arrayBuffer()) })
+      li.textContent = `✅ ${rotulo}${documento.nome}`
+    } catch (e) {
+      li.textContent = `⚠️ ${rotulo}${documento.nome} — erro: ${String((e && e.message) || e)}`
+    }
+  }
+
+  for (const anexo of anexos) {
+    const li = document.createElement('li')
+    li.textContent = `⏳ ${rotulo}${anexo.origem} — ${nomeAnexo(anexo)}`
+    lista.appendChild(li)
+
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: 'baixar-anexo', arquivoId: anexo.id, sistema })
+      if (!resp || resp.erro || resp.success !== true || typeof resp.base64 !== 'string') {
+        li.textContent = `⚠️ ${rotulo}${anexo.origem} — ${nomeAnexo(anexo)} (falha: ${(resp && resp.erro) || 'sem retorno'})`
+        continue
+      }
+      arquivos.push({ nome: `${prefixo}${pasta}/${nomeUnicoNoZip(nomeAnexo(anexo), usados)}`, bytes: base64ParaBytes(resp.base64) })
+      li.textContent = `✅ ${rotulo}${anexo.origem} — ${nomeAnexo(anexo)}`
+    } catch (e) {
+      li.textContent = `⚠️ ${rotulo}${anexo.origem} — ${nomeAnexo(anexo)} (erro: ${String((e && e.message) || e)})`
+    }
+  }
+
+  return arquivos
+}
+
 // Dispara o download local de um Blob.
 export function baixarBlob(blob, nomeArquivo) {
   const objectUrl = URL.createObjectURL(blob)
