@@ -308,7 +308,13 @@ function valorCelula(v: unknown): string | number {
     if (obj.numeroTermo != null) return obj.ano != null ? `${obj.numeroTermo}/${obj.ano}` : String(obj.numeroTermo);
     if (obj.descricao != null) return String(obj.descricao);
     if (obj.nome != null) return String(obj.nome);
+    // Fornecedor/responsável do Betha: o nome fica em `pessoa.nome` — mesma
+    // regra do valorTexto da extensão (campos-relatorio.js).
+    const pessoa = obj.pessoa as Record<string, unknown> | null | undefined;
+    if (pessoa && typeof pessoa === 'object' && pessoa.nome != null) return String(pessoa.nome);
   }
+  // Valor não reconhecido fica como JSON cru de propósito, pra um analista
+  // conferir manualmente — não trocar por texto vazio/simplificado.
   return JSON.stringify(v);
 }
 
@@ -334,9 +340,37 @@ function valorSolicitacaoFornecimento(valor: unknown): string {
     .join(', ');
 }
 
+// Campo "desdobramento" de uma interação contábil: um objeto por rateio
+// orçamentário, mas só interessa `item.desdobramento` (ex.: "33903900000000").
+// Mesma lógica do lado da extensão (browser-extension/src/shared/campos-relatorio.js).
+function valorDesdobramento(valor: unknown): string {
+  const lista = Array.isArray(valor) ? valor : [valor];
+  return lista
+    .map((item) => (item != null && typeof item === 'object' ? (item as Record<string, unknown>).desdobramento : item))
+    .filter((v) => v != null)
+    .join(', ');
+}
+
+// Número da despesa (ex.: "291") de cada rateio do `desdobramento` —
+// `despesa.numero` é injetado pela extensão (enriquecerNumerosDespesa em
+// popup.js); sem ele fica em branco, nunca mostra o id interno no lugar.
+function valorNumeroDespesa(valor: unknown): string {
+  const lista = Array.isArray(valor) ? valor : [valor];
+  return lista
+    .map((item) => {
+      const despesa = item != null && typeof item === 'object' ? (item as Record<string, unknown>).despesa : null;
+      return despesa != null && typeof despesa === 'object' ? (despesa as Record<string, unknown>).numero : null;
+    })
+    .filter((v) => v != null)
+    .join(', ');
+}
+
 export function valorCelulaDinamica(chave: string, valor: unknown): string | number {
   if (chave === 'solicitacaoFornecimento' && valor != null) {
     return valorSolicitacaoFornecimento(valor);
+  }
+  if (chave === 'desdobramento' && valor != null) {
+    return valorDesdobramento(valor);
   }
   if (ehChaveOrganograma(chave) && valor != null && typeof valor === 'object' && !Array.isArray(valor)) {
     const obj = valor as Record<string, unknown>;
@@ -508,11 +542,16 @@ function preencherPlanilhaCampos(planilha: ExcelJS.Worksheet, linhas: Array<{ ca
 // Mesma planilha campo/valor, mas a partir do JSON cru de um aditivo/
 // solicitação de fornecimento — catálogo de campos desses sub-recursos não
 // confirmado ao vivo, então mostramos tudo que vier (mesmo motivo de
-// dadosBrutos no schema.prisma).
-export function preencherPlanilhaCamposDinamicos(planilha: ExcelJS.Worksheet, raw: Record<string, unknown>) {
+// dadosBrutos no schema.prisma). `formatar` permite ao processo administrativo
+// usar a própria regra de valor (ver valorCelulaProcesso em processos.ts).
+export function preencherPlanilhaCamposDinamicos(
+  planilha: ExcelJS.Worksheet,
+  raw: Record<string, unknown>,
+  formatar: (chave: string, valor: unknown) => string | number = valorCelulaDinamica,
+) {
   preencherPlanilhaCampos(
     planilha,
-    Object.entries(raw).map(([chave, valor]) => ({ campo: formatarChave(chave), valor: valorCelulaDinamica(chave, valor) })),
+    Object.entries(raw).map(([chave, valor]) => ({ campo: formatarChave(chave), valor: formatar(chave, valor) })),
   );
 }
 
@@ -604,16 +643,19 @@ function workbookInteracaoContabilidade(
   const raw = interacao.dadosBrutos as Record<string, unknown>;
   // `contratacao` vira "Sequencial da contratação" — só o sequencial (injetado
   // pela extensão, ver enriquecerSequenciaisContratacao em popup.js), não o
-  // objeto cru com flags/id interno que o Betha devolve.
+  // objeto cru com flags/id interno que o Betha devolve. Logo após
+  // "Desdobramento" entra a linha "Despesa" (número da despesa de cada
+  // rateio), igual ao PDF da extensão.
   preencherPlanilhaCampos(
     planilha,
-    Object.entries(raw).map(([chave, valor]) => {
+    Object.entries(raw).flatMap(([chave, valor]) => {
       if (chave === 'contratacao') {
         const sequencial =
           valor != null && typeof valor === 'object' ? (valor as Record<string, unknown>).sequencial : null;
-        return { campo: 'Sequencial da contratação', valor: sequencial != null ? String(sequencial) : '' };
+        return [{ campo: 'Sequencial da contratação', valor: sequencial != null ? String(sequencial) : '' }];
       }
-      return { campo: formatarChave(chave), valor: valorCelulaDinamica(chave, valor) };
+      const linha = { campo: formatarChave(chave), valor: valorCelulaDinamica(chave, valor) };
+      return chave === 'desdobramento' ? [linha, { campo: 'Despesa', valor: valorNumeroDespesa(valor) }] : [linha];
     }),
   );
   return workbook;

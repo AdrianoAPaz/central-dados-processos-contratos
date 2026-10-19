@@ -325,6 +325,8 @@ export function valorTexto(v) {
     // fornecedor da solicitação de fornecimento, pedido do usuário,
     // 2026-10-14) — sem isso cai no JSON.stringify do objeto inteiro.
     if (v.pessoa && typeof v.pessoa === 'object' && v.pessoa.nome != null) return String(v.pessoa.nome)
+    // Valor não reconhecido fica como JSON cru de propósito, pra um analista
+    // conferir manualmente — não trocar por texto vazio/simplificado.
     return JSON.stringify(v)
   }
   return String(v)

@@ -175,6 +175,18 @@ processosRouter.get('/:id', async (req, res) => {
   res.json(processo);
 });
 
+// Valor exibido de um campo de processo/sub-recurso — além do que
+// valorCelulaDinamica já simplifica, a unidade de medida do Betha vem como
+// `{ simbolo }` (ex.: "UN") e cairia no JSON cru. Mesma regra do valorProcesso
+// da extensão (browser-extension/src/shared/campos-relatorio-processo.js).
+function valorCelulaProcesso(chave: string, valor: unknown): string | number {
+  if (valor != null && typeof valor === 'object' && !Array.isArray(valor)) {
+    const simbolo = (valor as Record<string, unknown>).simbolo;
+    if (simbolo != null) return String(simbolo);
+  }
+  return valorCelulaDinamica(chave, valor);
+}
+
 // Tabela com uma linha por registro e uma coluna por chave encontrada (união
 // das chaves de todos os registros, na ordem em que aparecem) — o catálogo de
 // campos dos sub-recursos não foi mapeado, então não há colunas fixas.
@@ -191,7 +203,7 @@ function preencherPlanilhaTabelaDinamica(planilha: ExcelJS.Worksheet, registros:
 
   for (const { dadosBrutos } of registros) {
     const raw = (dadosBrutos ?? {}) as Record<string, unknown>;
-    planilha.addRow(Object.fromEntries(chaves.map((chave) => [chave, valorCelulaDinamica(chave, raw[chave])])));
+    planilha.addRow(Object.fromEntries(chaves.map((chave) => [chave, valorCelulaProcesso(chave, raw[chave])])));
   }
 }
 
@@ -222,7 +234,7 @@ function tituloProcesso(processo: { numeroFormatado: string | null; idBetha: num
 // uma aba por sub-recurso de TIPOS_EM_ABA_DO_PROCESSO que tenha registros.
 function workbookProcesso(processo: ProcessoCompleto): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
-  preencherPlanilhaCamposDinamicos(workbook.addWorksheet('Processo'), processo.dadosBrutos as Record<string, unknown>);
+  preencherPlanilhaCamposDinamicos(workbook.addWorksheet('Processo'), processo.dadosBrutos as Record<string, unknown>, valorCelulaProcesso);
 
   for (const tipo of TIPOS_EM_ABA_DO_PROCESSO) {
     const registros = processo.subrecursos.filter((s) => s.tipo === tipo);
