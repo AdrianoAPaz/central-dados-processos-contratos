@@ -13,7 +13,9 @@ import {
   montarSecoesSolicitacoesFornecimento,
   montarSecoesInteracoesContabilidade,
   montarSecoesRecebimentos,
+  montarDocumentoPublicacoes,
   tituloContrato,
+  MENSAGEM_SEM_RESPONSAVEIS,
 } from './campos-relatorio.js'
 
 const MARGEM = 40
@@ -120,9 +122,19 @@ export function gerarPdfContrato(contrato) {
 
 // PDF só com os responsáveis do contrato (fiscal, gestor etc.): nome, tipo e
 // período de cada um. A seção também continua no PDF do contrato.
+// Gerado sempre (pedido do usuário, 2026-10-19): sem responsáveis, o
+// documento sai com o aviso em vez da tabela.
 export function gerarPdfResponsaveis(contrato) {
   const { doc, cursor } = novoDocumento(tituloResponsaveis(contrato))
-  desenharTabelaDinamica(doc, cursor, montarTabelaResponsaveis(contrato.responsaveis))
+  const tabela = montarTabelaResponsaveis(contrato.responsaveis)
+  if (tabela.linhas.length) {
+    desenharTabelaDinamica(doc, cursor, tabela)
+  } else {
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'italic')
+    doc.text(MENSAGEM_SEM_RESPONSAVEIS, MARGEM, cursor)
+    doc.setFont('helvetica', 'normal')
+  }
   return doc.output('blob')
 }
 
@@ -196,6 +208,25 @@ export function gerarPdfRecebimentos(secao) {
   return doc.output('blob')
 }
 
+// PDF "publicação contrato X" — um bloco por publicação com todos os campos,
+// ou o aviso de que não há nenhuma. `documento` é o retorno de
+// montarDocumentoPublicacoes.
+export function gerarPdfPublicacoes(documento) {
+  const { doc, cursor: inicioDoc } = novoDocumento(documento.titulo)
+  let cursor = inicioDoc
+  if (!documento.blocos.length) {
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'italic')
+    doc.text('Sem publicações cadastradas', MARGEM, cursor)
+    doc.setFont('helvetica', 'normal')
+  }
+  for (const bloco of documento.blocos) {
+    cursor = desenharTitulo(doc, cursor, bloco.titulo, 12)
+    cursor = desenharTabelaCampos(doc, cursor, bloco.campos)
+  }
+  return doc.output('blob')
+}
+
 // Nome de arquivo a partir da descrição do documento (ex.: "aditivo 1" ->
 // "aditivo-1") — sem acento, minúsculo, só letras/números separados por
 // hífen.
@@ -216,9 +247,8 @@ export function slug(texto) {
 export function listarDocumentosRelatorio(contrato) {
   const documentos = [{ nome: `${slug(tituloContrato(contrato))}.pdf`, gerar: () => gerarPdfContrato(contrato) }]
 
-  if (montarTabelaResponsaveis(contrato.responsaveis).linhas.length) {
-    documentos.push({ nome: `${slug(tituloResponsaveis(contrato))}.pdf`, gerar: () => gerarPdfResponsaveis(contrato) })
-  }
+  // Sempre gerado, mesmo sem responsáveis (aí sai com o aviso).
+  documentos.push({ nome: `${slug(tituloResponsaveis(contrato))}.pdf`, gerar: () => gerarPdfResponsaveis(contrato) })
 
   for (const secao of montarSecoesAditivos(contrato.aditivos)) {
     documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfAditivo(secao) })
@@ -235,6 +265,10 @@ export function listarDocumentosRelatorio(contrato) {
   for (const secao of montarSecoesRecebimentos(contrato.solicitacoesFornecimento)) {
     documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfRecebimentos(secao) })
   }
+
+  // Sempre gerado, mesmo sem publicação (pedido do usuário: um por contratação).
+  const publicacoes = montarDocumentoPublicacoes(contrato)
+  documentos.push({ nome: `${slug(publicacoes.titulo)}.pdf`, gerar: () => gerarPdfPublicacoes(publicacoes) })
 
   return documentos
 }

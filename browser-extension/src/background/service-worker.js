@@ -214,6 +214,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  // Veículos de publicação cadastrados (Diário Oficial, jornal…), pra
+  // resolver o veículo das publicações do contrato, que vem só com o id.
+  // Fica na API do Compras, não na do Contratos — endpoint informado pelo
+  // usuário (2026-10-19): GET veiculospublicacao?filter=&limit=20&offset=0&sort=.
+  if (message.type === 'buscar-veiculos-publicacao') {
+    buscarVeiculosPublicacao()
+      .then((veiculos) => sendResponse({ veiculos }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
   // Cadastro completo de UM responsável a partir do id (ver
   // buscarResponsavelContratos). Usado nos campos que vêm só com o id.
   if (message.type === 'buscar-responsavel') {
@@ -251,6 +262,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // isso vira "sem documentos de publicação" no relatório — não trava nada.
   // Se aparecer sempre vazio onde deveria ter dados, é o primeiro lugar a
   // corrigir (capturar a requisição real via DevTools na janela Publicação).
+  // Registros da janela "Publicação" do contrato (pra o documento
+  // "publicação contrato X") — mesmo caminho conjecturado de
+  // `buscar-anexos-publicacao` abaixo, com as mesmas ressalvas.
+  if (message.type === 'buscar-publicacoes') {
+    buscarSubrecurso(`${ENDPOINT_CONTRATACOES}/${limparId(message.id)}/publicacoes`)
+      .then((publicacoes) => sendResponse({ publicacoes }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
   if (message.type === 'buscar-anexos-publicacao') {
     buscarAnexosDeSubrecurso(message.id, 'publicacoes')
       .then((anexos) => sendResponse({ anexos }))
@@ -933,6 +954,26 @@ async function buscarPropostasParticipantes(sessao, processoId, participantes) {
     }
   }
   return propostas
+}
+
+// Todos os veículos de publicação do Compras (cadastro pequeno; paginado pelo
+// envelope de sempre). O offset avança pela quantidade recebida, caso a API
+// limite a página a menos do que foi pedido.
+async function buscarVeiculosPublicacao() {
+  const sessao = await exigirSessaoCompras()
+  const PAGINA = 100
+  const MAX = 1000
+  const veiculos = []
+  for (let offset = 0; offset < MAX; ) {
+    const resp = await getCompras(sessao, 'veiculospublicacao', { filter: '', limit: String(PAGINA), offset: String(offset), sort: '' })
+    if (!resp.ok) throw new Error(`API do Betha Compras respondeu ${resp.status} ao buscar veículos de publicação`)
+    const dados = await resp.json()
+    const pagina = Array.isArray(dados) ? dados : dados.content || []
+    veiculos.push(...pagina)
+    if (Array.isArray(dados) || !pagina.length || !dados.hasNext) break
+    offset += pagina.length
+  }
+  return veiculos
 }
 
 // Os atos finais trazem o `responsavel` só como o cadastro cru, sem nome (só o

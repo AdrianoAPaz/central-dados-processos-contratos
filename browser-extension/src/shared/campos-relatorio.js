@@ -262,12 +262,36 @@ export function montarSecoesRecebimentos(solicitacoes) {
     })
 }
 
+// Documento "publicação contrato 12/2026" (pedido do usuário, 2026-10-19) —
+// um por contratação, gerado mesmo sem publicação cadastrada (aí `blocos` vem
+// vazio e o documento avisa). Cada publicação da janela "Publicação" do
+// Betha vira um bloco com TODOS os campos que a API devolveu (catálogo não
+// confirmado ao vivo, mesmo princípio das solicitações de fornecimento).
+export function tituloPublicacoes(c) {
+  return `publicação ${tituloContrato(c)}`
+}
+
+export function montarDocumentoPublicacoes(c) {
+  const publicacoes = Array.isArray(c.publicacoes) ? c.publicacoes : []
+  return {
+    titulo: tituloPublicacoes(c),
+    blocos: publicacoes.map((raw, index) => ({
+      titulo: `publicação ${index + 1}`,
+      campos: Object.entries(raw || {}).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor) })),
+    })),
+  }
+}
+
 // Responsáveis do contrato (fiscal, gestor etc.) em seção própria — pedido
 // do usuário: nome, tipo e período de cada um, não misturados nos campos do
 // contrato. Formato confirmado ao vivo pelo usuário (2026-09-17) contra o
 // retorno real do sub-recurso `responsaveiscontratacao`: nome em
 // `responsavel.pessoa.nome`, tipo em `tipoResponsavelContrato.descricao`,
 // período em `dataInicioResponsabilidade`/`dataFinalResponsabilidade`.
+// Aviso do documento "responsáveis do contrato X" quando não há nenhum —
+// mesmo texto no PDF, na página do relatório e no Excel do backend.
+export const MENSAGEM_SEM_RESPONSAVEIS = 'O contrato não tem responsáveis cadastrados'
+
 export function montarTabelaResponsaveis(responsaveis) {
   if (!Array.isArray(responsaveis) || !responsaveis.length) return { colunas: [], linhas: [] }
   return {
@@ -395,9 +419,26 @@ function valorSolicitacaoFornecimento(valor) {
     .join(', ')
 }
 
+// Veículo de publicação (campo da publicação do contrato cuja chave contém
+// "veiculo") — pedido do usuário (2026-10-19): o nome exibido é o do
+// fornecedor do veículo, `fornecedor.pessoa.nome` (ex.: "MUNICIPIO DE ARROIO
+// DO TIGRE"), formato confirmado ao vivo em `veiculospublicacao` do Compras.
+// Veículo sem esse nome cai no valorTexto (e no JSON cru, se nada servir).
+function ehChaveVeiculo(chave) {
+  return typeof chave === 'string' && /veiculo/i.test(chave)
+}
+
+function nomeVeiculo(item) {
+  const pessoa = item && typeof item === 'object' && item.fornecedor && item.fornecedor.pessoa
+  return pessoa && pessoa.nome != null ? String(pessoa.nome) : valorTexto(item)
+}
+
 export function valorCampoDinamico(chave, valor) {
   if (ehChaveSolicitacaoFornecimento(chave) && valor != null) {
     return valorSolicitacaoFornecimento(valor)
+  }
+  if (ehChaveVeiculo(chave) && valor && typeof valor === 'object') {
+    return Array.isArray(valor) ? valor.map(nomeVeiculo).join(', ') : nomeVeiculo(valor)
   }
   if (ehChaveOrganograma(chave) && valor && typeof valor === 'object' && !Array.isArray(valor)) {
     const descricao = valor.descricao != null ? String(valor.descricao) : ''

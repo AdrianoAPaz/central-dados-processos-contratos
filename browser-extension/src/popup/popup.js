@@ -251,6 +251,35 @@ async function enriquecerSequenciaisContratacao(interacoes, contrato) {
 // Busca só quando o usuário efetivamente age sobre UM contrato (enviar/gerar
 // PDF), evitando N+1 requisições pra cada candidato da lista. Itens de cada
 // aditivo (se existirem) vêm aninhados dentro do próprio aditivo.
+// O veículo de cada publicação do contrato (campo cuja chave contém
+// "veiculo", ex.: `veiculoPublicacao`) vem só com o id; o cadastro completo,
+// com o nome, está em `veiculospublicacao` do Compras (pedido do usuário,
+// 2026-10-19, ver buscarVeiculosPublicacao no service-worker.js). O valor pode
+// ser o objeto ({ id, … }), só o id, ou uma lista deles. Best-effort: sem
+// sessão do Compras, ou se a busca falhar, o campo fica como veio (JSON cru).
+async function enriquecerVeiculosPublicacao(publicacoes) {
+  const temVeiculo = (registro) => Object.keys(registro || {}).some((chave) => /veiculo/i.test(chave))
+  if (!publicacoes.some(temVeiculo)) return publicacoes
+
+  const resp = await chrome.runtime.sendMessage({ type: 'buscar-veiculos-publicacao' })
+  if (!resp || resp.erro) return publicacoes
+  const veiculoPorId = new Map((resp.veiculos || []).map((v) => [String(v.id), v]))
+
+  const resolver = (valor) => {
+    if (Array.isArray(valor)) return valor.map(resolver)
+    const completo = veiculoPorId.get(idDoValor(valor))
+    if (!completo) return valor
+    return valor && typeof valor === 'object' ? { ...valor, ...completo } : completo
+  }
+  return publicacoes.map((registro) => {
+    const enriquecido = { ...registro }
+    for (const chave of Object.keys(registro || {})) {
+      if (/veiculo/i.test(chave)) enriquecido[chave] = resolver(registro[chave])
+    }
+    return enriquecido
+  })
+}
+
 // Itens da solicitação de fornecimento em ordem crescente do número do item
 // (pedido do usuário, 2026-10-19). Mesmas chaves candidatas da coluna "Nº do
 // item" (CAMPOS_ITEM em campos-relatorio.js). Item sem número vai pro fim,
@@ -270,21 +299,23 @@ function ordenarItensPorNumero(itens) {
 async function comDetalhes(contrato) {
   if (contrato.id == null) return contrato
 
-  const [respAditivos, respItens, respSf, respAnexosTextos, respAnexosPublicacao, respResponsaveis, respInteracoes] = await Promise.all([
-    chrome.runtime.sendMessage({ type: 'buscar-aditivos', id: contrato.id }),
-    chrome.runtime.sendMessage({ type: 'buscar-itens', id: contrato.id }),
-    chrome.runtime.sendMessage({ type: 'buscar-solicitacoes-fornecimento', id: contrato.id }),
-    chrome.runtime.sendMessage({ type: 'buscar-anexos-textos', id: contrato.id }),
-    chrome.runtime.sendMessage({ type: 'buscar-anexos-publicacao', id: contrato.id }),
-    chrome.runtime.sendMessage({ type: 'buscar-responsaveis', id: contrato.id }),
-    chrome.runtime.sendMessage({ type: 'buscar-interacoes-contabilidade', id: contrato.id }),
-  ])
+  const [respAditivos, respItens, respSf, respAnexosTextos, respAnexosPublicacao, respPublicacoes, respResponsaveis, respInteracoes] =
+    await Promise.all([
+      chrome.runtime.sendMessage({ type: 'buscar-aditivos', id: contrato.id }),
+      chrome.runtime.sendMessage({ type: 'buscar-itens', id: contrato.id }),
+      chrome.runtime.sendMessage({ type: 'buscar-solicitacoes-fornecimento', id: contrato.id }),
+      chrome.runtime.sendMessage({ type: 'buscar-anexos-textos', id: contrato.id }),
+      chrome.runtime.sendMessage({ type: 'buscar-anexos-publicacao', id: contrato.id }),
+      chrome.runtime.sendMessage({ type: 'buscar-publicacoes', id: contrato.id }),
+      chrome.runtime.sendMessage({ type: 'buscar-responsaveis', id: contrato.id }),
+      chrome.runtime.sendMessage({ type: 'buscar-interacoes-contabilidade', id: contrato.id }),
+    ])
   if (respAditivos && respAditivos.erro) throw new Error(respAditivos.erro)
   if (respItens && respItens.erro) throw new Error(respItens.erro)
   if (respSf && respSf.erro) throw new Error(respSf.erro)
   // Publicação é best-effort (caminho não confirmado ao vivo, ver
   // service-worker.js) — um erro aqui não pode travar o resto do relatório,
-  // só falta esse conjunto de anexos.
+  // só faltam os anexos e os registros de publicação.
   if (respAnexosTextos && respAnexosTextos.erro) throw new Error(respAnexosTextos.erro)
   if (respResponsaveis && respResponsaveis.erro) throw new Error(respResponsaveis.erro)
   if (respInteracoes && respInteracoes.erro) throw new Error(respInteracoes.erro)
@@ -359,6 +390,7 @@ async function comDetalhes(contrato) {
     solicitacoesFornecimento: solicitacoesComRecebimentos,
     anexosTextos: respAnexosTextos.anexos || [],
     anexosPublicacao: (respAnexosPublicacao && !respAnexosPublicacao.erro && respAnexosPublicacao.anexos) || [],
+    publicacoes: await enriquecerVeiculosPublicacao((respPublicacoes && !respPublicacoes.erro && respPublicacoes.publicacoes) || []),
     responsaveis: respResponsaveis.responsaveis || [],
     interacoesContabilidade: await enriquecerSequenciaisContratacao(
       await enriquecerNumerosDespesa(respInteracoes.interacoes || []),

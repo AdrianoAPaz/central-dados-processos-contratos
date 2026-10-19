@@ -102,6 +102,7 @@ contratosRouter.post('/', async (req, res) => {
   await prisma.solicitacaoFornecimento.deleteMany({ where: { contratoId: contrato.id } });
   await prisma.responsavelContrato.deleteMany({ where: { contratoId: contrato.id } });
   await prisma.interacaoContabilidade.deleteMany({ where: { contratoId: contrato.id } });
+  await prisma.publicacaoContrato.deleteMany({ where: { contratoId: contrato.id } });
 
   // Ordem de exibição é cronológica pelo sequencial do próprio aditivo (não a
   // ordem em que a API devolveu) — `ordem` já nasce refletindo isso, então
@@ -249,6 +250,20 @@ contratosRouter.post('/', async (req, res) => {
     });
   }
 
+  // Publicações (janela "Publicação" do contrato) — caminho
+  // contratacoes/{id}/publicacoes ainda não confirmado ao vivo. Mesma regra
+  // dos demais sub-recursos: `ordem` reflete a posição recebida.
+  const publicacoes = Array.isArray(body.publicacoes) ? (body.publicacoes as Record<string, unknown>[]) : [];
+  if (publicacoes.length) {
+    await prisma.publicacaoContrato.createMany({
+      data: publicacoes.map((raw, i) => ({
+        contratoId: contrato.id,
+        ordem: i + 1,
+        dadosBrutos: raw as Prisma.InputJsonObject,
+      })),
+    });
+  }
+
   res.status(201).json(contrato);
 });
 
@@ -378,9 +393,22 @@ function valorNumeroDespesa(valor: unknown): string {
     .join(', ');
 }
 
+// Veículo de publicação (chave contém "veiculo"): o nome exibido é
+// `fornecedor.pessoa.nome` do veículo. Mesma lógica do lado da extensão
+// (browser-extension/src/shared/campos-relatorio.js).
+function nomeVeiculo(item: unknown): string | number {
+  const fornecedor = item != null && typeof item === 'object' ? (item as Record<string, unknown>).fornecedor : null;
+  const pessoa = fornecedor != null && typeof fornecedor === 'object' ? (fornecedor as Record<string, unknown>).pessoa : null;
+  const nome = pessoa != null && typeof pessoa === 'object' ? (pessoa as Record<string, unknown>).nome : null;
+  return nome != null ? String(nome) : valorCelula(item);
+}
+
 export function valorCelulaDinamica(chave: string, valor: unknown): string | number {
   if (chave === 'solicitacaoFornecimento' && valor != null) {
     return valorSolicitacaoFornecimento(valor);
+  }
+  if (/veiculo/i.test(chave) && valor != null && typeof valor === 'object') {
+    return Array.isArray(valor) ? valor.map(nomeVeiculo).join(', ') : nomeVeiculo(valor);
   }
   if (chave === 'desdobramento' && valor != null) {
     return valorDesdobramento(valor);
@@ -415,6 +443,7 @@ function buscarContrato(id: string) {
       },
       responsaveis: { orderBy: { ordem: 'asc' } },
       interacoesContabilidade: { orderBy: { ordem: 'asc' } },
+      publicacoes: { orderBy: { ordem: 'asc' } },
     },
   });
 }
@@ -617,9 +646,16 @@ function workbookContrato(contrato: NonNullable<Awaited<ReturnType<typeof buscar
 // Documento próprio só com os responsáveis do contrato — separado do
 // workbook do contrato (que mantém a aba "Responsáveis"), mesmo princípio dos
 // demais documentos (um assunto por arquivo).
+// Sem responsáveis, a aba sai com o aviso (mesmo texto da extensão,
+// MENSAGEM_SEM_RESPONSAVEIS em campos-relatorio.js) — pedido do usuário,
+// 2026-10-19: o documento é gerado sempre.
 function workbookResponsaveis(responsaveis: Array<{ dadosBrutos: unknown }>): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
-  preencherPlanilhaResponsaveis(workbook.addWorksheet('Responsáveis'), responsaveis);
+  const planilha = workbook.addWorksheet('Responsáveis');
+  preencherPlanilhaResponsaveis(planilha, responsaveis);
+  if (responsaveis.length === 0) {
+    planilha.addRow({ responsavel: 'O contrato não tem responsáveis cadastrados' });
+  }
   return workbook;
 }
 
@@ -729,6 +765,33 @@ function tituloContrato(contrato: { numeroFormatado: string | null; sequencial: 
   return `contrato ${numero}`;
 }
 
+// "publicação contrato 12/2026" — mesmo título do PDF da extensão
+// (tituloPublicacoes em browser-extension/src/shared/campos-relatorio.js).
+function tituloPublicacoes(contrato: { numeroFormatado: string | null; sequencial: number }): string {
+  return `publicação ${tituloContrato(contrato)}`;
+}
+
+// Documento "publicação contrato X": uma aba por publicação, com todos os
+// campos que a API devolveu (mesmo princípio de workbookRecebimentos). Sem
+// publicação, uma aba única com o aviso — o documento sai sempre, um por
+// contratação (pedido do usuário, 2026-10-19).
+function workbookPublicacoes(publicacoes: Array<{ dadosBrutos: unknown }>): ExcelJS.Workbook {
+  const workbook = new ExcelJS.Workbook();
+  if (publicacoes.length === 0) {
+    preencherPlanilhaCampos(workbook.addWorksheet('Publicações'), [
+      { campo: 'Publicações', valor: 'Sem publicações cadastradas' },
+    ]);
+    return workbook;
+  }
+  publicacoes.forEach((publicacao, index) => {
+    preencherPlanilhaCamposDinamicos(
+      workbook.addWorksheet(`Publicação ${index + 1}`.slice(0, 31)),
+      (publicacao.dadosBrutos ?? {}) as Record<string, unknown>,
+    );
+  });
+  return workbook;
+}
+
 function tituloResponsaveis(contrato: { numeroFormatado: string | null; sequencial: number }): string {
   return `responsáveis do ${tituloContrato(contrato)}`;
 }
@@ -799,11 +862,10 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
 
   arquivoZip.append(await workbookParaBuffer(workbookContrato(contrato)), { name: `${nomeContrato}.xlsx` });
 
-  if (contrato.responsaveis.length > 0) {
-    arquivoZip.append(await workbookParaBuffer(workbookResponsaveis(contrato.responsaveis)), {
-      name: `${slug(tituloResponsaveis(contrato))}.xlsx`,
-    });
-  }
+  // Sempre gerado, mesmo sem responsáveis (aí sai com o aviso).
+  arquivoZip.append(await workbookParaBuffer(workbookResponsaveis(contrato.responsaveis)), {
+    name: `${slug(tituloResponsaveis(contrato))}.xlsx`,
+  });
 
   for (const aditivo of contrato.aditivos) {
     const buffer = await workbookParaBuffer(workbookAditivo(aditivo));
@@ -825,6 +887,10 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
     const buffer = await workbookParaBuffer(workbookRecebimentos(solicitacao));
     arquivoZip.append(buffer, { name: `${slug(tituloRecebimentos(solicitacao))}.xlsx` });
   }
+
+  arquivoZip.append(await workbookParaBuffer(workbookPublicacoes(contrato.publicacoes)), {
+    name: `${slug(tituloPublicacoes(contrato))}.xlsx`,
+  });
 
   await arquivoZip.finalize();
 });

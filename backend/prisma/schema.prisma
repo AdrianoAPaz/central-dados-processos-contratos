@@ -55,6 +55,7 @@ model Contrato {
   solicitacoesFornecimento SolicitacaoFornecimento[]
   responsaveis             ResponsavelContrato[]
   interacoesContabilidade  InteracaoContabilidade[]
+  publicacoes              PublicacaoContrato[]
 
   criadoEm     DateTime @default(now()) @map("criado_em")
   atualizadoEm DateTime @updatedAt @map("atualizado_em")
@@ -315,4 +316,23 @@ model SubrecursoProcesso {
 
   @@unique([processoId, tipo, ordem])
   @@map("subrecurso_processo")
+}
+
+// Um registro da janela "Publicação" do contrato no Betha Contratos — buscado
+// pela extensão em `contratacoes/{id}/publicacoes` (caminho ainda não
+// confirmado ao vivo, ver service-worker.js). Vira o documento "publicação
+// contrato X". Mesmo motivo dos demais sub-recursos pra não achatar campos:
+// guardamos o JSON cru. `ordem` é a posição no array recebido.
+model PublicacaoContrato {
+  id         String   @id @default(cuid())
+  contratoId String   @map("contrato_id")
+  contrato   Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+
+  ordem Int
+
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  @@unique([contratoId, ordem])
+  @@map("publicacao_contrato")
 }

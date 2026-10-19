@@ -6,6 +6,8 @@ import {
   montarSecoesSolicitacoesFornecimento,
   montarSecoesInteracoesContabilidade,
   montarSecoesRecebimentos,
+  montarDocumentoPublicacoes,
+  MENSAGEM_SEM_RESPONSAVEIS,
 } from '../shared/campos-relatorio.js'
 import { criarZip } from '../shared/zip.js'
 import { listarDocumentosRelatorio } from '../shared/pdf-relatorio.js'
@@ -71,12 +73,18 @@ async function carregar() {
   // Responsáveis do contrato (fiscal, gestor etc.) — seção própria com nome,
   // tipo e período de cada um, em vez de um campo único na tabela principal.
   const containerResponsaveis = document.getElementById('responsaveis')
+  // Aparece sempre — sem responsáveis, com o mesmo aviso do documento.
   const tabelaResponsaveis = criarTabelaDinamica(montarTabelaResponsaveis(contrato.responsaveis))
+  const tituloResponsaveis = document.createElement('h2')
+  tituloResponsaveis.textContent = `Responsáveis (${(contrato.responsaveis || []).length})`
+  containerResponsaveis.appendChild(tituloResponsaveis)
   if (tabelaResponsaveis) {
-    const titulo = document.createElement('h2')
-    titulo.textContent = `Responsáveis (${contrato.responsaveis.length})`
-    containerResponsaveis.appendChild(titulo)
     containerResponsaveis.appendChild(tabelaResponsaveis)
+  } else {
+    const semResponsaveis = document.createElement('p')
+    semResponsaveis.className = 'sem-itens'
+    semResponsaveis.textContent = MENSAGEM_SEM_RESPONSAVEIS
+    containerResponsaveis.appendChild(semResponsaveis)
   }
 
   const secoesAditivos = montarSecoesAditivos(contrato.aditivos)
@@ -214,6 +222,30 @@ async function carregar() {
 
       container.appendChild(blocoSf)
     }
+  }
+
+  // Publicações do contrato — mesmo conteúdo do documento "publicação
+  // contrato X"; a seção aparece sempre, com o aviso quando não há nenhuma.
+  const documentoPublicacoes = montarDocumentoPublicacoes(contrato)
+  const containerPublicacoes = document.getElementById('publicacoes')
+  const tituloPublicacoes = document.createElement('h2')
+  tituloPublicacoes.textContent = `Publicações (${documentoPublicacoes.blocos.length})`
+  containerPublicacoes.appendChild(tituloPublicacoes)
+
+  if (!documentoPublicacoes.blocos.length) {
+    const semPublicacoes = document.createElement('p')
+    semPublicacoes.className = 'sem-itens'
+    semPublicacoes.textContent = 'Sem publicações cadastradas'
+    containerPublicacoes.appendChild(semPublicacoes)
+  }
+  for (const bloco of documentoPublicacoes.blocos) {
+    const div = document.createElement('div')
+    div.className = 'aditivo-secao'
+    const h3 = document.createElement('h3')
+    h3.textContent = bloco.titulo
+    div.appendChild(h3)
+    div.appendChild(criarTabelaCampos(bloco.campos))
+    containerPublicacoes.appendChild(div)
   }
 
   // Gera o PDF do relatório e baixa os anexos automaticamente ao abrir a
