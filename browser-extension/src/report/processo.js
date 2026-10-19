@@ -49,7 +49,7 @@ async function montarPacoteRelatorio(processo, anexos, container) {
   // Sem contratações vinculadas o zip continua só com os arquivos do processo,
   // soltos na raiz. Com elas, o zip ganha duas pastas: a do processo e a de
   // "Contratações" (uma subpasta por contratação, com os PDFs e anexos dela).
-  const prefixoProcesso = contratacoes.length ? `Processo administrativo numero ${numero}/` : ''
+  const prefixoProcesso = contratacoes.length ? `Proc Adm ${numero}/` : ''
 
   // Um PDF por documento (o processo e cada sub-recurso com registros) — cada
   // um gera e falha independente dos demais.
