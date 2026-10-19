@@ -864,6 +864,61 @@ async function buscarPropostasParticipantes(sessao, processoId, participantes) {
   return propostas
 }
 
+// Os atos finais trazem o `responsavel` só como o cadastro cru, sem nome (só o
+// `id` vem preenchido; `pessoa`, `cargo`, `funcao`… vêm nulos — pedido do
+// usuário, 2026-10-19). O registro completo está em `responsaveis/paginacao`.
+// Tenta o filtro por id no servidor e, se a API recusar ou ignorar, varre as
+// páginas — sempre conferindo o id no cliente, porque o filtro não foi
+// confirmado ao vivo. Devolve null se não achar (o relatório mantém o que veio).
+async function buscarResponsavelCompras(sessao, id) {
+  const PAGINA = 100
+  const MAX_VARREDURA = 1000
+  const alvo = String(id)
+
+  const listar = async (params) => {
+    const resp = await getCompras(sessao, 'responsaveis/paginacao', { sort: '', ...params })
+    if (!resp.ok) return null
+    const dados = await resp.json()
+    return Array.isArray(dados) ? { content: dados, hasNext: false } : dados
+  }
+
+  const filtrado = await listar({ filter: `id = ${alvo}`, limit: '20', offset: '0' })
+  const exato = ((filtrado && filtrado.content) || []).find((r) => r && String(r.id) === alvo)
+  if (exato) return exato
+
+  for (let offset = 0; offset < MAX_VARREDURA; offset += PAGINA) {
+    const pagina = await listar({ filter: '', limit: String(PAGINA), offset: String(offset) })
+    if (!pagina) return null
+    const achado = (pagina.content || []).find((r) => r && String(r.id) === alvo)
+    if (achado) return achado
+    if (!pagina.hasNext || !(pagina.content || []).length) break
+  }
+  return null
+}
+
+// Substitui, em cada ato final, o `responsavel` (objeto só com id) pelo
+// cadastro completo. Um id por vez e com cache — vários atos costumam ter o
+// mesmo responsável. Falha ao buscar um responsável não derruba nada: o ato
+// fica como veio.
+async function enriquecerResponsaveisAtosFinais(sessao, atos) {
+  const cache = new Map()
+  const resultado = []
+  for (const ato of atos) {
+    const atual = ato && ato.responsavel
+    if (!atual || typeof atual !== 'object' || atual.id == null || atual.pessoa) {
+      resultado.push(ato)
+      continue
+    }
+    const chave = String(atual.id)
+    if (!cache.has(chave)) {
+      cache.set(chave, await buscarResponsavelCompras(sessao, atual.id).catch(() => null))
+    }
+    const completo = cache.get(chave)
+    resultado.push(completo ? { ...ato, responsavel: { ...atual, ...completo } } : ato)
+  }
+  return resultado
+}
+
 // Todos os sub-recursos de um processo — um por vez (mesma cautela contra
 // rajada dos demais). Falha em UM sub-recurso (ex.: 403/500) não derruba os
 // outros: vira aviso. Devolve `{ subrecursos: { <tipo>: [...] }, avisos }`.
@@ -879,6 +934,12 @@ async function buscarDetalhesProcesso(processoId, arquivosInline) {
       subrecursos[tipo] = []
       avisos.push(`${tipo}: ${String((e && e.message) || e)}`)
     }
+  }
+
+  try {
+    subrecursos.atosfinais = await enriquecerResponsaveisAtosFinais(sessao, subrecursos.atosfinais || [])
+  } catch (e) {
+    avisos.push(`responsáveis dos atos finais: ${String((e && e.message) || e)}`)
   }
 
   try {
