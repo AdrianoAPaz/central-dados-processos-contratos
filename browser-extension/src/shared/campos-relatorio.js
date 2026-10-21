@@ -42,6 +42,7 @@ export function montarCamposRelatorio(c) {
     { label: 'Valor de solicitações de fornecimento (R$)', valor: formatarValor(c.valorSolFornec) },
     { label: 'Quantidade de itens', valor: Array.isArray(c.itens) ? c.itens.length : 0 },
     { label: 'Quantidade de aditivos', valor: Array.isArray(c.aditivos) ? c.aditivos.length : 0 },
+    { label: 'Quantidade de apostilamentos', valor: Array.isArray(c.apostilamentos) ? c.apostilamentos.length : 0 },
   ]
 }
 
@@ -129,9 +130,20 @@ function extrairIdentificadorAditivo(raw) {
 // aditivo (se houver) viram uma tabela própria logo abaixo dos campos dele —
 // nunca misturados com os do contrato ou de outro aditivo.
 export function montarSecoesAditivos(aditivos) {
-  if (!Array.isArray(aditivos) || !aditivos.length) return []
+  return montarSecoesAlteracao(aditivos, 'aditivo')
+}
 
-  const ordenados = aditivos
+// Apostilamentos — a outra alteração contratual além do aditivo (pedido do
+// usuário, 2026-10-21: considerar todas as alterações contratuais). Mesma
+// estrutura e ordenação do aditivo; título "apostilamento 1".
+export function montarSecoesApostilamentos(apostilamentos) {
+  return montarSecoesAlteracao(apostilamentos, 'apostilamento')
+}
+
+function montarSecoesAlteracao(registros, rotulo) {
+  if (!Array.isArray(registros) || !registros.length) return []
+
+  const ordenados = registros
     .map((raw, indiceOriginal) => ({ raw, indiceOriginal, chave: extrairIdentificadorAditivo(raw) ?? Infinity }))
     .sort((a, b) => a.chave - b.chave || a.indiceOriginal - b.indiceOriginal)
     .map((x) => x.raw)
@@ -141,9 +153,9 @@ export function montarSecoesAditivos(aditivos) {
     const numero = index + 1
     // Descrição do documento — pedido do usuário: "aditivo 1" pro aditivo de
     // número sequencial 1 (sem a palavra "relatório"). Usa o sequencial do
-    // próprio aditivo quando existir; cai pra posição cronológica só quando
+    // próprio registro quando existir; cai pra posição cronológica só quando
     // o Betha não trouxe nenhum identificador próprio.
-    const titulo = `aditivo ${identificador ?? numero}`
+    const titulo = `${rotulo} ${identificador ?? numero}`
 
     const { itens, ...demaisCampos } = raw || {}
     const campos = camposDinamicos(demaisCampos, raw)
@@ -216,6 +228,7 @@ export function montarSecoesInteracoesContabilidade(interacoes) {
       // `desdobramento` (ver enriquecerNumerosDespesa).
       if (chave === 'desdobramento') {
         campos.push({ label: 'Despesa', valor: valorNumeroDespesa(valor) })
+        campos.push({ label: 'Número do empenho', valor: valorNumeroEmpenho(raw) })
       }
     }
     return { titulo, campos }
@@ -473,6 +486,29 @@ function valorNumeroDespesa(valor) {
     .map((item) => (item && typeof item === 'object' && item.despesa ? item.despesa.numero : null))
     .filter((v) => v != null)
     .join(', ')
+}
+
+// Número do empenho (ex.: 5426) gerado quando a interação é contabilizada —
+// pedido do usuário (2026-10-21). Confirmado no retorno real do Betha: cada
+// rateio do `desdobramento` traz `empenhoContabilidadeBO.numeroEmpenho`
+// (presente em empenhar/liquidar/pagar) e, só no "Empenhar", também
+// `numeroEmpenho` direto no rateio. Interação não contabilizada fica em branco.
+function interacaoContabilizada(raw) {
+  const situacao = raw && (raw.situacao || raw.situacaoDesc)
+  return typeof situacao === 'string' && /^contabilizad/i.test(situacao.trim())
+}
+
+function valorNumeroEmpenho(raw) {
+  if (!interacaoContabilizada(raw)) return ''
+  const lista = Array.isArray(raw.desdobramento) ? raw.desdobramento : []
+  const numeros = lista
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const bo = item.empenhoContabilidadeBO
+      return bo && typeof bo === 'object' && bo.numeroEmpenho != null ? bo.numeroEmpenho : item.numeroEmpenho
+    })
+    .filter((v) => v != null)
+  return [...new Set(numeros)].join(', ')
 }
 
 // Campo "solicitacaoFornecimento" de uma interação contábil — pedido do

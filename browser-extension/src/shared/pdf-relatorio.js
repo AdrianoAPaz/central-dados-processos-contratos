@@ -1,5 +1,5 @@
 // Gera o relatório da tela (report.js) como PDFs de verdade — um por
-// documento (contrato, cada aditivo, cada solicitação de fornecimento), pra
+// documento (contrato, cada aditivo, cada apostilamento, cada solicitação de fornecimento), pra
 // empacotar junto com os anexos no zip (pedido do usuário: relatórios
 // separados por documento). `window.print()` não devolve bytes, só abre o
 // diálogo nativo do navegador, por isso não dá pra usá-lo aqui. Usa jsPDF +
@@ -8,6 +8,7 @@
 import {
   montarCamposRelatorio,
   montarSecoesAditivos,
+  montarSecoesApostilamentos,
   montarTabelaItens,
   montarTabelaResponsaveis,
   montarSecoesSolicitacoesFornecimento,
@@ -164,6 +165,19 @@ export function gerarPdfAditivo(secao) {
   return doc.output('blob')
 }
 
+// PDF de UM apostilamento (todos os campos que a API devolveu) — `secao` é
+// uma entrada de montarSecoesApostilamentos. Apostilamento em geral não tem
+// itens vinculados: a tabela só sai se o registro trouxer `itens`, sem o aviso
+// "Sem itens vinculados" que o aditivo mostra.
+export function gerarPdfApostilamento(secao) {
+  const { doc, cursor: inicio } = novoDocumento(secao.titulo)
+  const cursor = desenharTabelaCampos(doc, inicio, secao.campos)
+  if (secao.tabelaItens.linhas.length) {
+    desenharTabelaDinamica(doc, desenharTitulo(doc, cursor, 'Itens', 13), secao.tabelaItens)
+  }
+  return doc.output('blob')
+}
+
 // PDF de UMA solicitação de fornecimento (todos os campos que a API
 // devolveu + itens vinculados a ela) — `secao` é uma entrada de
 // montarSecoesSolicitacoesFornecimento. Mesmo estilo de gerarPdfAditivo.
@@ -273,6 +287,10 @@ export function listarDocumentosRelatorio(contrato) {
 
   for (const secao of montarSecoesAditivos(contrato.aditivos)) {
     documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfAditivo(secao) })
+  }
+
+  for (const secao of montarSecoesApostilamentos(contrato.apostilamentos)) {
+    documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfApostilamento(secao) })
   }
 
   for (const secao of montarSecoesSolicitacoesFornecimento(contrato.solicitacoesFornecimento)) {

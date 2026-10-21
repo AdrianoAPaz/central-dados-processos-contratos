@@ -11,11 +11,15 @@ export function coletarAnexosContrato(contrato) {
   const doAditivos = (Array.isArray(contrato.aditivos) ? contrato.aditivos : []).flatMap((aditivo, i) =>
     (Array.isArray(aditivo.arquivos) ? aditivo.arquivos : []).map((a) => ({ ...a, origem: `Aditivo ${i + 1}` })),
   )
+  // Apostilamentos também podem trazer o seu `arquivos` inline.
+  const doApostilamentos = (Array.isArray(contrato.apostilamentos) ? contrato.apostilamentos : []).flatMap((apostilamento, i) =>
+    (Array.isArray(apostilamento.arquivos) ? apostilamento.arquivos : []).map((a) => ({ ...a, origem: `Apostilamento ${i + 1}` })),
+  )
   // Documentos das janelas "Textos" e "Publicação" do contrato — buscados à
   // parte (não vêm no campo inline `arquivos`, ver service-worker.js).
   const doTextos = (Array.isArray(contrato.anexosTextos) ? contrato.anexosTextos : []).map((a) => ({ ...a, origem: 'Textos' }))
   const daPublicacao = (Array.isArray(contrato.anexosPublicacao) ? contrato.anexosPublicacao : []).map((a) => ({ ...a, origem: 'Publicação' }))
-  return [...doContrato, ...doAditivos, ...doTextos, ...daPublicacao].filter((a) => a && a.id)
+  return [...doContrato, ...doAditivos, ...doApostilamentos, ...doTextos, ...daPublicacao].filter((a) => a && a.id)
 }
 
 export function numeroContrato(contrato) {

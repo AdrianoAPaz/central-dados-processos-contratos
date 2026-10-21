@@ -296,12 +296,56 @@ function ordenarItensPorNumero(itens) {
     .map((x) => x.raw)
 }
 
+// A listagem de alterações contratuais traz cada registro embrulhado
+// (`{ tipoAlteracao, tipo, operacao, valor, aditivo | apostilamento }`). Aqui
+// o registro é desembrulhado: o objeto interno (que é o que o relatório
+// mostra) ganha `valor`/`operacao` do invólucro quando não os tem — o
+// apostilamento só traz o valor no invólucro (ex.: reajuste de R$ 9.424,80).
+function achatarAlteracao(alteracao) {
+  const interno = alteracao[String(alteracao.tipoAlteracao || '').toLowerCase()]
+  const base = interno && typeof interno === 'object' ? interno : alteracao
+  const resumo = {}
+  if (alteracao.operacao) resumo.operacao = alteracao.operacao
+  if (alteracao.valor != null && base.valorAditivo == null) resumo.valor = alteracao.valor
+  return { ...base, ...resumo }
+}
+
+// Separa a listagem de alterações em apostilamentos e em aditivos que a
+// listagem `aditivos` não trouxe (as duas fontes se complementam: nenhuma
+// alteração contratual pode ficar de fora do relatório).
+function separarAlteracoes(alteracoes, aditivosConhecidos) {
+  const idsConhecidos = new Set(aditivosConhecidos.map((a) => String(a && a.id)))
+  const apostilamentos = []
+  const aditivosExtras = []
+  for (const alteracao of alteracoes) {
+    if (!alteracao || typeof alteracao !== 'object') continue
+    const tipo = String(alteracao.tipoAlteracao || '').toUpperCase()
+    if (tipo === 'APOSTILAMENTO') apostilamentos.push(achatarAlteracao(alteracao))
+    else if (tipo === 'ADITIVO') {
+      const aditivo = achatarAlteracao(alteracao)
+      if (!idsConhecidos.has(String(aditivo.id ?? alteracao.idAlteracao))) aditivosExtras.push(aditivo)
+    }
+  }
+  return { apostilamentos, aditivosExtras }
+}
+
 async function comDetalhes(contrato) {
   if (contrato.id == null) return contrato
 
-  const [respAditivos, respItens, respSf, respAnexosTextos, respAnexosPublicacao, respPublicacoes, respResponsaveis, respInteracoes] =
+  const [
+    respAditivos,
+    respAlteracoes,
+    respItens,
+    respSf,
+    respAnexosTextos,
+    respAnexosPublicacao,
+    respPublicacoes,
+    respResponsaveis,
+    respInteracoes,
+  ] =
     await Promise.all([
       chrome.runtime.sendMessage({ type: 'buscar-aditivos', id: contrato.id }),
+      chrome.runtime.sendMessage({ type: 'buscar-alteracoes', id: contrato.id }),
       chrome.runtime.sendMessage({ type: 'buscar-itens', id: contrato.id }),
       chrome.runtime.sendMessage({ type: 'buscar-solicitacoes-fornecimento', id: contrato.id }),
       chrome.runtime.sendMessage({ type: 'buscar-anexos-textos', id: contrato.id }),
@@ -320,7 +364,15 @@ async function comDetalhes(contrato) {
   if (respResponsaveis && respResponsaveis.erro) throw new Error(respResponsaveis.erro)
   if (respInteracoes && respInteracoes.erro) throw new Error(respInteracoes.erro)
 
-  const aditivos = await enriquecerDescricoesCadastros(respAditivos.aditivos || [])
+  // Alterações contratuais (endpoint confirmado, ver service-worker.js): um
+  // erro na busca não trava o relatório, só ficam sem apostilamentos/aditivos
+  // extras.
+  const alteracoes = (respAlteracoes && !respAlteracoes.erro && respAlteracoes.alteracoes) || []
+  const aditivosDaListagem = respAditivos.aditivos || []
+  const separadas = separarAlteracoes(alteracoes, aditivosDaListagem)
+  const apostilamentos = await enriquecerDescricoesCadastros(separadas.apostilamentos)
+
+  const aditivos = await enriquecerDescricoesCadastros([...aditivosDaListagem, ...separadas.aditivosExtras])
   const aditivosComItens = await Promise.all(
     aditivos.map(async (aditivo) => {
       if (aditivo.id == null) return aditivo
@@ -387,6 +439,7 @@ async function comDetalhes(contrato) {
     ...contrato,
     itens: respItens.itens || [],
     aditivos: aditivosComItens,
+    apostilamentos,
     solicitacoesFornecimento: solicitacoesComRecebimentos,
     anexosTextos: respAnexosTextos.anexos || [],
     // Registros da rotina "Textos" — documento "textos contrato X".
@@ -402,7 +455,7 @@ async function comDetalhes(contrato) {
 }
 
 async function enviar(contrato, botao) {
-  mostrarMsg('Buscando aditivos, itens, solicitações de fornecimento, recebimentos, interações contábeis e documentos…', 'info')
+  mostrarMsg('Buscando aditivos, apostilamentos, itens, solicitações de fornecimento, recebimentos, interações contábeis e documentos…', 'info')
   botao.disabled = true
   try {
     const contratoCompleto = await comDetalhes(contrato)
@@ -424,7 +477,7 @@ const CHAVE_RELATORIO = 'centralDados.relatorioAtual'
 // nativa de impressão do Chrome, sem precisar de nenhuma biblioteca.
 async function gerarPdf(contrato, botao) {
   if (botao) botao.disabled = true
-  mostrarMsg('Buscando aditivos, itens, solicitações de fornecimento, recebimentos, interações contábeis e documentos…', 'info')
+  mostrarMsg('Buscando aditivos, apostilamentos, itens, solicitações de fornecimento, recebimentos, interações contábeis e documentos…', 'info')
   try {
     const contratoCompleto = await comDetalhes(contrato)
     await chrome.storage.local.set({ [CHAVE_RELATORIO]: contratoCompleto })

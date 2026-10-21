@@ -1,6 +1,7 @@
 import {
   montarCamposRelatorio,
   montarSecoesAditivos,
+  montarSecoesApostilamentos,
   montarTabelaItens,
   montarTabelaResponsaveis,
   montarSecoesSolicitacoesFornecimento,
@@ -117,6 +118,31 @@ async function carregar() {
         semItens.textContent = `Aditivo ${secao.numero} sem itens vinculados`
         bloco.appendChild(semItens)
       }
+
+      container.appendChild(bloco)
+    }
+  }
+
+  // Apostilamentos — mesma estrutura dos aditivos; os itens só aparecem se o
+  // registro trouxer algum (apostilamento sem itens é o caso comum).
+  const secoesApostilamentos = montarSecoesApostilamentos(contrato.apostilamentos)
+  if (secoesApostilamentos.length) {
+    const container = document.getElementById('apostilamentos')
+    const titulo = document.createElement('h2')
+    titulo.textContent = `Apostilamentos (${secoesApostilamentos.length})`
+    container.appendChild(titulo)
+
+    for (const secao of secoesApostilamentos) {
+      const bloco = document.createElement('div')
+      bloco.className = 'aditivo-secao'
+
+      const h3 = document.createElement('h3')
+      h3.textContent = secao.titulo
+      bloco.appendChild(h3)
+      bloco.appendChild(criarTabelaCampos(secao.campos))
+
+      const tabelaItensApostilamento = criarTabelaDinamica(secao.tabelaItens)
+      if (tabelaItensApostilamento) bloco.appendChild(tabelaItensApostilamento)
 
       container.appendChild(bloco)
     }

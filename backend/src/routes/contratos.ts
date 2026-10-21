@@ -70,7 +70,7 @@ contratosRouter.get('/', async (_req, res) => {
       fornecedorNome: true,
       situacaoDesc: true,
       criadoEm: true,
-      _count: { select: { aditivos: true } },
+      _count: { select: { aditivos: true, apostilamentos: true } },
     },
   });
   res.json(contratos);
@@ -98,6 +98,7 @@ contratosRouter.post('/', async (req, res) => {
   // anteriores (evita duplicar/deixar registro removido no Betha órfão
   // aqui). Deletar os aditivos já cria em cascata a remoção dos itens deles.
   await prisma.aditivo.deleteMany({ where: { contratoId: contrato.id } });
+  await prisma.apostilamento.deleteMany({ where: { contratoId: contrato.id } });
   await prisma.item.deleteMany({ where: { contratoId: contrato.id, aditivoId: null } });
   await prisma.solicitacaoFornecimento.deleteMany({ where: { contratoId: contrato.id } });
   await prisma.responsavelContrato.deleteMany({ where: { contratoId: contrato.id } });
@@ -138,6 +139,23 @@ contratosRouter.post('/', async (req, res) => {
         })),
       });
     }
+  }
+
+  // Apostilamentos (contratacoes/{id}/apostilamentos) — mesma ordenação
+  // cronológica dos aditivos: `ordem` já nasce refletindo o sequencial.
+  const apostilamentosRecebidos = (Array.isArray(body.apostilamentos) ? (body.apostilamentos as Record<string, unknown>[]) : [])
+    .map((raw, indiceOriginal) => ({ raw, indiceOriginal, chave: extrairIdentificadorAditivo(raw) ?? Infinity }))
+    .sort((a, b) => a.chave - b.chave || a.indiceOriginal - b.indiceOriginal)
+    .map((x) => x.raw);
+  if (apostilamentosRecebidos.length) {
+    await prisma.apostilamento.createMany({
+      data: apostilamentosRecebidos.map((raw, i) => ({
+        contratoId: contrato.id,
+        ordem: i + 1,
+        sequencial: extrairIdentificadorAditivo(raw),
+        dadosBrutos: raw as Prisma.InputJsonObject,
+      })),
+    });
   }
 
   const itensDoContrato = Array.isArray(body.itens) ? (body.itens as Record<string, unknown>[]) : [];
@@ -309,6 +327,7 @@ const CAMPOS_RELATORIO: Array<{ label: string; valor: (c: NonNullable<Awaited<Re
   { label: 'Valor de solicitações de fornecimento (R$)', valor: (c) => (c.valorSolFornec != null ? Number(c.valorSolFornec) : null) },
   { label: 'Quantidade de itens', valor: (c) => c.itens.length },
   { label: 'Quantidade de aditivos', valor: (c) => c.aditivos.length },
+  { label: 'Quantidade de apostilamentos', valor: (c) => c.apostilamentos.length },
 ];
 
 // Datas SEMPRE em dd/mm/aaaa neste relatório — nunca ISO (aaaa-mm-dd).
@@ -410,6 +429,28 @@ function valorNumeroDespesa(valor: unknown): string {
     .join(', ');
 }
 
+// Número do empenho (ex.: 5426) gerado quando a interação é contabilizada:
+// `empenhoContabilidadeBO.numeroEmpenho` de cada rateio do `desdobramento`
+// (ou `numeroEmpenho` direto no rateio, no "Empenhar"). Interação não
+// contabilizada fica em branco. Mesma lógica do lado da extensão
+// (browser-extension/src/shared/campos-relatorio.js).
+function valorNumeroEmpenho(raw: Record<string, unknown>): string {
+  const situacao = raw.situacao ?? raw.situacaoDesc;
+  if (typeof situacao !== 'string' || !/^contabilizad/i.test(situacao.trim())) return '';
+  const lista = Array.isArray(raw.desdobramento) ? raw.desdobramento : [];
+  const numeros = lista
+    .map((item) => {
+      if (item == null || typeof item !== 'object') return null;
+      const rateio = item as Record<string, unknown>;
+      const bo = rateio.empenhoContabilidadeBO;
+      return bo != null && typeof bo === 'object' && (bo as Record<string, unknown>).numeroEmpenho != null
+        ? (bo as Record<string, unknown>).numeroEmpenho
+        : rateio.numeroEmpenho;
+    })
+    .filter((v) => v != null);
+  return [...new Set(numeros)].join(', ');
+}
+
 // Veículo de publicação (chave contém "veiculo"): o nome exibido é
 // `fornecedor.pessoa.nome` do veículo. Mesma lógica do lado da extensão
 // (browser-extension/src/shared/campos-relatorio.js).
@@ -497,6 +538,7 @@ function buscarContrato(id: string) {
         orderBy: { ordem: 'asc' },
         include: { itens: { orderBy: { ordem: 'asc' } } },
       },
+      apostilamentos: { orderBy: { ordem: 'asc' } },
       solicitacoesFornecimento: {
         orderBy: { ordem: 'asc' },
         include: {
@@ -748,6 +790,25 @@ function workbookAditivo(aditivo: NonNullable<Awaited<ReturnType<typeof buscarCo
   return workbook;
 }
 
+function workbookApostilamento(
+  apostilamento: NonNullable<Awaited<ReturnType<typeof buscarContrato>>>['apostilamentos'][number],
+): ExcelJS.Workbook {
+  const workbook = new ExcelJS.Workbook();
+  const planilha = workbook.addWorksheet('Apostilamento');
+  // `itens` (quando o registro trouxer) vira aba própria, como no aditivo; o
+  // restante dos campos fica na planilha campo/valor.
+  const { itens, ...demaisCampos } = (apostilamento.dadosBrutos ?? {}) as Record<string, unknown>;
+  preencherPlanilhaCamposDinamicos(planilha, demaisCampos);
+  if (Array.isArray(itens) && itens.length > 0) {
+    preencherPlanilhaItens(
+      workbook.addWorksheet('Itens'),
+      null,
+      (itens as Record<string, unknown>[]).map((raw, i) => ({ __fixo: String(i + 1), raw })),
+    );
+  }
+  return workbook;
+}
+
 function workbookSolicitacaoFornecimento(
   solicitacao: NonNullable<Awaited<ReturnType<typeof buscarContrato>>>['solicitacoesFornecimento'][number],
 ): ExcelJS.Workbook {
@@ -788,7 +849,13 @@ function workbookInteracaoContabilidade(
         return [{ campo: 'Sequencial da contratação', valor: sequencial != null ? String(sequencial) : '' }];
       }
       const linha = { campo: formatarChave(chave), valor: valorCelulaDinamica(chave, valor, contexto) };
-      return chave === 'desdobramento' ? [linha, { campo: 'Despesa', valor: valorNumeroDespesa(valor) }] : [linha];
+      return chave === 'desdobramento'
+        ? [
+            linha,
+            { campo: 'Despesa', valor: valorNumeroDespesa(valor) },
+            { campo: 'Número do empenho', valor: valorNumeroEmpenho(raw) },
+          ]
+        : [linha];
     }),
   );
   return workbook;
@@ -945,6 +1012,10 @@ function tituloAditivo(aditivo: { sequencial: number | null; ordem: number }): s
   return `aditivo ${aditivo.sequencial ?? aditivo.ordem}`;
 }
 
+function tituloApostilamento(apostilamento: { sequencial: number | null; ordem: number }): string {
+  return `apostilamento ${apostilamento.sequencial ?? apostilamento.ordem}`;
+}
+
 function tituloSolicitacaoFornecimento(solicitacao: { ordem: number; dadosBrutos: unknown }): string {
   const raw = (solicitacao.dadosBrutos ?? {}) as Record<string, unknown>;
   const numero = (raw.numeroAno as string | undefined) ?? (raw.numero != null ? String(raw.numero) : undefined);
@@ -1015,6 +1086,11 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
   for (const aditivo of contrato.aditivos) {
     const buffer = await workbookParaBuffer(workbookAditivo(aditivo));
     arquivoZip.append(buffer, { name: `${slug(tituloAditivo(aditivo))}.xlsx` });
+  }
+
+  for (const apostilamento of contrato.apostilamentos) {
+    const buffer = await workbookParaBuffer(workbookApostilamento(apostilamento));
+    arquivoZip.append(buffer, { name: `${slug(tituloApostilamento(apostilamento))}.xlsx` });
   }
 
   for (const solicitacao of contrato.solicitacoesFornecimento) {

@@ -93,6 +93,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  // Todas as alterações contratuais do contrato (aditivos E apostilamentos
+  // numa listagem só, cada registro com `tipoAlteracao` ADITIVO/APOSTILAMENTO
+  // e o objeto completo em `aditivo`/`apostilamento`) — formato confirmado
+  // pelo JSON cru que o usuário colou (2026-10-21). Endpoint confirmado ao
+  // vivo pelo usuário (2026-10-21): GET contratacoes/{id}/alteracoes?filter=
+  // &limit=20&offset=0&sort= (contrato real 8807434).
+  if (message.type === 'buscar-alteracoes') {
+    buscarSubrecurso(`${ENDPOINT_CONTRATACOES}/${limparId(message.id)}/alteracoes`)
+      .then((alteracoes) => sendResponse({ alteracoes }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
   if (message.type === 'buscar-itens') {
     buscarSubrecurso(`${ENDPOINT_CONTRATACOES}/${limparId(message.id)}/itens`)
       .then((itens) => sendResponse({ itens }))

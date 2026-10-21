@@ -51,6 +51,7 @@ model Contrato {
   dadosBrutos Json @map("dados_brutos")
 
   aditivos                 Aditivo[]
+  apostilamentos           Apostilamento[]
   itens                    Item[]
   solicitacoesFornecimento SolicitacaoFornecimento[]
   responsaveis             ResponsavelContrato[]
@@ -89,6 +90,28 @@ model Aditivo {
 
   @@unique([contratoId, ordem])
   @@map("aditivo")
+}
+
+// Um registro do sub-recurso `contratacoes/{id}/apostilamentos` do Betha
+// Contratos (caminho ainda não confirmado ao vivo) — o outro tipo de alteração
+// contratual além do aditivo. Mesmo motivo dos demais sub-recursos pra não
+// achatar campos: guardamos o JSON cru. `ordem` é a posição no array recebido
+// (já na ordem cronológica do sequencial, ver contratos.ts).
+model Apostilamento {
+  id         String   @id @default(cuid())
+  contratoId String   @map("contrato_id")
+  contrato   Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+
+  ordem      Int
+  // Melhor palpite de identificador próprio (raw.sequencial ou raw.id) — só
+  // para exibição, igual ao do Aditivo.
+  sequencial Int?
+
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  @@unique([contratoId, ordem])
+  @@map("apostilamento")
 }
 
 // Um item do sub-recurso `contratacoes/{id}/itens` — do contrato em si
