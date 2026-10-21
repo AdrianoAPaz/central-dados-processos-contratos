@@ -7,7 +7,9 @@ import {
   montarSecoesInteracoesContabilidade,
   montarSecoesRecebimentos,
   montarDocumentoPublicacoes,
+  montarDocumentoTextos,
   MENSAGEM_SEM_RESPONSAVEIS,
+  MENSAGEM_SEM_TEXTOS,
 } from '../shared/campos-relatorio.js'
 import { criarZip } from '../shared/zip.js'
 import { listarDocumentosRelatorio } from '../shared/pdf-relatorio.js'
@@ -246,6 +248,31 @@ async function carregar() {
     div.appendChild(h3)
     div.appendChild(criarTabelaCampos(bloco.campos))
     containerPublicacoes.appendChild(div)
+  }
+
+  // Textos do contrato (rotina "Textos") — mesmo conteúdo do documento
+  // "textos contrato X"; a seção aparece sempre, com o aviso quando não há
+  // nenhum.
+  const documentoTextos = montarDocumentoTextos(contrato)
+  const containerTextos = document.getElementById('textos')
+  const tituloTextos = document.createElement('h2')
+  tituloTextos.textContent = `Textos (${documentoTextos.blocos.length})`
+  containerTextos.appendChild(tituloTextos)
+
+  if (!documentoTextos.blocos.length) {
+    const semTextos = document.createElement('p')
+    semTextos.className = 'sem-itens'
+    semTextos.textContent = MENSAGEM_SEM_TEXTOS
+    containerTextos.appendChild(semTextos)
+  }
+  for (const bloco of documentoTextos.blocos) {
+    const div = document.createElement('div')
+    div.className = 'aditivo-secao'
+    const h3 = document.createElement('h3')
+    h3.textContent = bloco.titulo
+    div.appendChild(h3)
+    div.appendChild(criarTabelaCampos(bloco.campos))
+    containerTextos.appendChild(div)
   }
 
   // Gera o PDF do relatório e baixa os anexos automaticamente ao abrir a

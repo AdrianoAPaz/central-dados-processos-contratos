@@ -13,7 +13,16 @@
 // dos sub-recursos NÃO foi mapeado, então as tabelas escolhem as colunas
 // pelos dados que vierem (ver montarTabelaGenerica) e os documentos por
 // sub-recurso mostram TODOS os campos.
-import { formatarChave, formatarData, formatarValor, indexarEntidades, valorCampoDinamico } from './campos-relatorio.js'
+import {
+  MENSAGEM_SEM_TEXTOS,
+  conteudoTexto,
+  formatarChave,
+  formatarData,
+  formatarValor,
+  indexarEntidades,
+  tituloBlocoTexto,
+  valorCampoDinamico,
+} from './campos-relatorio.js'
 
 // Valor exibido de um campo de processo/sub-recurso. Além do que
 // `valorCampoDinamico` já simplifica (descricao/nome/pessoa.nome/datas…),
@@ -96,7 +105,10 @@ export const SUBRECURSOS_EM_TABELA = [
 
 // Sub-recursos que viram um DOCUMENTO próprio (um PDF cada), com todos os
 // campos de cada registro — mesmo princípio dos aditivos/solicitações do
-// contrato. `singular` nomeia cada bloco dentro do documento.
+// contrato. `singular` nomeia cada bloco dentro do documento. `textos` (rotina
+// "Textos" do processo, pedido do usuário, 2026-10-21) sai sempre, mesmo sem
+// registros (aí com o aviso `vazio`), e cada bloco leva o título do texto —
+// mesmo documento "textos contrato X" das contratações.
 export const SUBRECURSOS_EM_DOCUMENTO = [
   { chave: 'pareceres', rotulo: 'pareceres', singular: 'parecer' },
   { chave: 'sessoesjulgamento', rotulo: 'sessões de julgamento', singular: 'sessão de julgamento' },
@@ -104,7 +116,7 @@ export const SUBRECURSOS_EM_DOCUMENTO = [
   { chave: 'despesas', rotulo: 'despesas', singular: 'despesa' },
   { chave: 'historico', rotulo: 'histórico', singular: 'registro' },
   { chave: 'atas', rotulo: 'atas de registro de preços', singular: 'ata' },
-  { chave: 'textos', rotulo: 'textos', singular: 'texto' },
+  { chave: 'textos', rotulo: 'textos', singular: 'texto', vazio: MENSAGEM_SEM_TEXTOS },
 ]
 
 export function numeroProcesso(p) {
@@ -284,14 +296,26 @@ export function montarDocumentosSubrecursos(p) {
 }
 
 function montarDocumentosDemais(p, base) {
-  return SUBRECURSOS_EM_DOCUMENTO.map(({ chave, rotulo, singular }) => ({ chave, registros: subrecurso(p, chave), rotulo, singular }))
-    .filter(({ registros }) => registros.length)
-    .map(({ registros, rotulo, singular }) => ({
+  return SUBRECURSOS_EM_DOCUMENTO.map((definicao) => ({ ...definicao, registros: subrecurso(p, definicao.chave) }))
+    .filter(({ registros, vazio }) => registros.length || vazio)
+    .map(({ chave, registros, rotulo, singular, vazio }) => ({
+      chave,
       titulo: `${rotulo} do ${base}`,
-      blocos: registros.map((raw, index) => ({
-        titulo: `${singular} ${index + 1}`,
-        campos: camposDe(raw, p),
-      })),
+      vazio,
+      blocos: registros.map((raw, index) =>
+        chave === 'textos'
+          ? { titulo: tituloBlocoTexto(raw, index), campos: camposTextoProcesso(raw, p) }
+          : { titulo: `${singular} ${index + 1}`, campos: camposDe(raw, p) },
+      ),
     }))
+}
+
+// Campos de um texto do processo: `conteudo` (HTML do editor) vira texto
+// corrido, igual nos textos da contratação; o resto segue valorProcesso.
+function camposTextoProcesso(raw, p) {
+  return Object.entries(raw || {}).map(([chave, valor]) => ({
+    label: formatarChave(chave),
+    valor: chave === 'conteudo' ? conteudoTexto(valor) : valorProcesso(chave, valor, p),
+  }))
 }
 

@@ -47,10 +47,18 @@ export function gerarPdfProcesso(processo) {
   return doc.output('blob')
 }
 
-// PDF de UM sub-recurso: cada registro é um bloco com todos os campos.
+// PDF de UM sub-recurso: cada registro é um bloco com todos os campos. Sem
+// registros (só os documentos que saem sempre, como o de textos), o aviso
+// `documento.vazio`.
 export function gerarPdfSubrecurso(documento) {
   const { doc, cursor: inicioDoc } = novoDocumento(documento.titulo)
   let cursor = inicioDoc
+  if (!documento.blocos.length && documento.vazio) {
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'italic')
+    doc.text(documento.vazio, 40, cursor)
+    doc.setFont('helvetica', 'normal')
+  }
   for (const bloco of documento.blocos) {
     cursor = desenharTitulo(doc, cursor, bloco.titulo, 12)
     cursor = desenharTabelaCampos(doc, cursor, bloco.campos)

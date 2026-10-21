@@ -119,6 +119,12 @@ async function carregar() {
     h2.textContent = `${documento.titulo.charAt(0).toUpperCase()}${documento.titulo.slice(1)} (${documento.blocos.length})`
     containerDocumentos.appendChild(h2)
 
+    if (!documento.blocos.length && documento.vazio) {
+      const vazio = document.createElement('p')
+      vazio.className = 'sem-itens'
+      vazio.textContent = documento.vazio
+      containerDocumentos.appendChild(vazio)
+    }
     for (const bloco of documento.blocos) {
       const div = document.createElement('div')
       div.className = 'aditivo-secao'

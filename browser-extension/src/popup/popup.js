@@ -389,6 +389,8 @@ async function comDetalhes(contrato) {
     aditivos: aditivosComItens,
     solicitacoesFornecimento: solicitacoesComRecebimentos,
     anexosTextos: respAnexosTextos.anexos || [],
+    // Registros da rotina "Textos" — documento "textos contrato X".
+    textos: respAnexosTextos.textos || [],
     anexosPublicacao: (respAnexosPublicacao && !respAnexosPublicacao.erro && respAnexosPublicacao.anexos) || [],
     publicacoes: await enriquecerVeiculosPublicacao((respPublicacoes && !respPublicacoes.erro && respPublicacoes.publicacoes) || []),
     responsaveis: respResponsaveis.responsaveis || [],

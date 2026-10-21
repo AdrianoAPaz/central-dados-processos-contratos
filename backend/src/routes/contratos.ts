@@ -103,6 +103,7 @@ contratosRouter.post('/', async (req, res) => {
   await prisma.responsavelContrato.deleteMany({ where: { contratoId: contrato.id } });
   await prisma.interacaoContabilidade.deleteMany({ where: { contratoId: contrato.id } });
   await prisma.publicacaoContrato.deleteMany({ where: { contratoId: contrato.id } });
+  await prisma.textoContrato.deleteMany({ where: { contratoId: contrato.id } });
 
   // Ordem de exibição é cronológica pelo sequencial do próprio aditivo (não a
   // ordem em que a API devolveu) — `ordem` já nasce refletindo isso, então
@@ -257,6 +258,19 @@ contratosRouter.post('/', async (req, res) => {
   if (publicacoes.length) {
     await prisma.publicacaoContrato.createMany({
       data: publicacoes.map((raw, i) => ({
+        contratoId: contrato.id,
+        ordem: i + 1,
+        dadosBrutos: raw as Prisma.InputJsonObject,
+      })),
+    });
+  }
+
+  // Textos (rotina "Textos" do contrato) — já com `arquivos` completos pela
+  // extensão. Mesma regra dos demais sub-recursos.
+  const textos = Array.isArray(body.textos) ? (body.textos as Record<string, unknown>[]) : [];
+  if (textos.length) {
+    await prisma.textoContrato.createMany({
+      data: textos.map((raw, i) => ({
         contratoId: contrato.id,
         ordem: i + 1,
         dadosBrutos: raw as Prisma.InputJsonObject,
@@ -496,6 +510,7 @@ function buscarContrato(id: string) {
       responsaveis: { orderBy: { ordem: 'asc' } },
       interacoesContabilidade: { orderBy: { ordem: 'asc' } },
       publicacoes: { orderBy: { ordem: 'asc' } },
+      textos: { orderBy: { ordem: 'asc' } },
     },
   });
 }
@@ -850,6 +865,78 @@ function workbookPublicacoes(publicacoes: Array<{ dadosBrutos: unknown }>): Exce
   return workbook;
 }
 
+// "textos contrato 12/2026" — mesmo título do PDF da extensão (tituloTextos em
+// browser-extension/src/shared/campos-relatorio.js).
+function tituloTextos(contrato: { numeroFormatado: string | null; sequencial: number }): string {
+  return `textos ${tituloContrato(contrato)}`;
+}
+
+const MENSAGEM_SEM_TEXTOS = 'Sem textos cadastrados';
+
+// "texto 1 — Termo de Referência": o `titulo` do próprio texto, quando houver.
+function tituloBlocoTexto(raw: Record<string, unknown>, index: number): string {
+  const titulo = typeof raw.titulo === 'string' ? raw.titulo.trim() : '';
+  return titulo ? `texto ${index + 1} — ${titulo}` : `texto ${index + 1}`;
+}
+
+// Nome da aba de um texto: "Texto 1 - Termo de Referência", sem os
+// caracteres que o Excel não aceita em nome de aba e no limite de 31.
+function nomeAbaTexto(raw: Record<string, unknown>, index: number): string {
+  const nome = tituloBlocoTexto(raw, index).replace('—', '-').replace(/[\\/?*[\]:']/g, ' ');
+  return `${nome.charAt(0).toUpperCase()}${nome.slice(1)}`.slice(0, 31).trim();
+}
+
+// `conteudo` do texto vem do editor do Betha — pode ser HTML. Na planilha
+// vira texto corrido, uma linha por parágrafo, sem as tags. Mesma lógica do
+// lado da extensão (conteudoTexto em browser-extension/src/shared/campos-relatorio.js).
+function conteudoTexto(valor: unknown): string | number {
+  if (typeof valor !== 'string') return valorCelula(valor);
+  if (!/<[a-z!/][^>]*>/i.test(valor)) return valor;
+  const entidades: Record<string, string> = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+  return valor
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/\s*(p|div|li|h[1-6]|tr)\s*>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (original, codigo: string) => {
+      if (codigo[0] === '#') {
+        const n = codigo[1].toLowerCase() === 'x' ? parseInt(codigo.slice(2), 16) : parseInt(codigo.slice(1), 10);
+        return Number.isNaN(n) || n > 0x10ffff ? original : String.fromCodePoint(n);
+      }
+      return entidades[codigo.toLowerCase()] ?? original;
+    })
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// Documento "textos contrato X": uma aba por texto da rotina "Textos", com
+// todos os campos que a API devolveu (mesmo princípio de workbookPublicacoes).
+// Sem textos, uma aba única com o aviso — sai sempre, um por contratação
+// (pedido do usuário, 2026-10-21). Também usado pelos textos do processo
+// administrativo, que passam a própria regra de valor em `formatar` (ver
+// valorCelulaProcesso em processos.ts); `conteudo` é sempre convertido aqui.
+export function workbookTextos(
+  textos: Array<{ dadosBrutos: unknown }>,
+  formatar?: (raw: Record<string, unknown>, chave: string, valor: unknown) => string | number,
+): ExcelJS.Workbook {
+  const workbook = new ExcelJS.Workbook();
+  if (textos.length === 0) {
+    preencherPlanilhaCampos(workbook.addWorksheet('Textos'), [{ campo: 'Textos', valor: MENSAGEM_SEM_TEXTOS }]);
+    return workbook;
+  }
+  textos.forEach((texto, index) => {
+    const raw = (texto.dadosBrutos ?? {}) as Record<string, unknown>;
+    const contexto = { entidades: indexarEntidades(raw) };
+    const valorDoCampo = formatar
+      ? (chave: string, valor: unknown) => formatar(raw, chave, valor)
+      : (chave: string, valor: unknown) => valorCelulaDinamica(chave, valor, contexto);
+    preencherPlanilhaCamposDinamicos(workbook.addWorksheet(nomeAbaTexto(raw, index)), raw, (chave, valor) =>
+      chave === 'conteudo' ? conteudoTexto(valor) : valorDoCampo(chave, valor),
+    );
+  });
+  return workbook;
+}
+
 function tituloResponsaveis(contrato: { numeroFormatado: string | null; sequencial: number }): string {
   return `responsáveis do ${tituloContrato(contrato)}`;
 }
@@ -948,6 +1035,15 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
 
   arquivoZip.append(await workbookParaBuffer(workbookPublicacoes(contrato.publicacoes)), {
     name: `${slug(tituloPublicacoes(contrato))}.xlsx`,
+  });
+
+  // Entidades só com id resolvidas pelo contrato inteiro (igual ao PDF).
+  const entidadesContrato = indexarEntidades([contrato.dadosBrutos, ...contrato.textos.map((t) => t.dadosBrutos)]);
+  const textosXlsx = workbookTextos(contrato.textos, (_raw, chave, valor) =>
+    valorCelulaDinamica(chave, valor, { entidades: entidadesContrato }),
+  );
+  arquivoZip.append(await workbookParaBuffer(textosXlsx), {
+    name: `${slug(tituloTextos(contrato))}.xlsx`,
   });
 
   await arquivoZip.finalize();

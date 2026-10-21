@@ -11,6 +11,7 @@ import {
   slug,
   valorCelulaDinamica,
   workbookParaBuffer,
+  workbookTextos,
 } from './contratos';
 
 export const processosRouter = Router();
@@ -363,6 +364,15 @@ processosRouter.get('/:id/relatorio', async (req, res) => {
   const contexto = contextoProcesso(processo);
   for (const [tipo, rotulo] of Object.entries(TIPOS_EM_ARQUIVO_PROPRIO)) {
     const registros = processo.subrecursos.filter((s) => s.tipo === tipo);
+    // Textos: sempre gerado, uma aba por texto (mesmo documento "textos
+    // contrato X" das contratações, pedido do usuário, 2026-10-21).
+    if (tipo === 'textos') {
+      const buffer = await workbookParaBuffer(
+        workbookTextos(registros, (_raw, chave, valor) => valorCelulaProcesso(chave, valor, contexto)),
+      );
+      arquivoZip.append(buffer, { name: `${slug(`${rotulo} do ${titulo}`)}.xlsx` });
+      continue;
+    }
     if (registros.length === 0) continue;
     const buffer = await workbookParaBuffer(workbookSubrecurso(registros, TIPOS_SUBRECURSO[tipo], contexto));
     arquivoZip.append(buffer, { name: `${slug(`${rotulo} do ${titulo}`)}.xlsx` });

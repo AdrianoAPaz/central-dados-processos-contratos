@@ -248,10 +248,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // Documentos da janela "Textos" do contrato. Confirmado ao vivo no projeto
   // irmão Delta Intelligence (2026-07-07): os anexos do contrato ficam
   // dentro dos textos, não no campo inline `arquivos` do próprio contrato
-  // (ver buscarAnexosDeTextos abaixo).
+  // (ver buscarTextosContrato abaixo). Devolve também os próprios textos
+  // (com `arquivos` completos) pro documento "textos contrato X".
   if (message.type === 'buscar-anexos-textos') {
-    buscarAnexosDeTextos(message.id)
-      .then((anexos) => sendResponse({ anexos }))
+    buscarTextosContrato(message.id)
+      .then(({ textos, anexos }) => sendResponse({ textos, anexos }))
       .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
     return true
   }
@@ -512,24 +513,34 @@ async function buscarItemDeSubrecurso(caminho) {
 // inline, senão só o GET do item individual traz. Sequencial (não
 // Promise.all) pra não rajar a API com N GETs de uma vez — mesma cautela já
 // aplicada ao download dos anexos em si (ver montarPacoteRelatorio).
-async function buscarAnexosDeSubrecurso(contratoId, subrecurso) {
+// Devolve os registros já com `arquivos` (o detalhe individual, quando
+// buscado, completa o registro da listagem) e os anexos de todos juntos.
+async function buscarRegistrosComArquivos(contratoId, subrecurso) {
   const registros = await buscarSubrecurso(`${ENDPOINT_CONTRATACOES}/${limparId(contratoId)}/${subrecurso}`)
+  const completos = []
   const anexos = []
   for (const registro of registros) {
-    let arquivosDoRegistro = Array.isArray(registro && registro.arquivos) ? registro.arquivos : null
-    if (!arquivosDoRegistro && registro && registro.id != null) {
+    let completo = registro
+    if (!Array.isArray(registro && registro.arquivos) && registro && registro.id != null) {
       const detalhe = await buscarItemDeSubrecurso(
         `${ENDPOINT_CONTRATACOES}/${limparId(contratoId)}/${subrecurso}/${limparId(registro.id)}`,
       )
-      arquivosDoRegistro = Array.isArray(detalhe && detalhe.arquivos) ? detalhe.arquivos : []
+      completo = { ...registro, ...(detalhe || {}) }
+      if (!Array.isArray(completo.arquivos)) completo.arquivos = []
     }
-    if (arquivosDoRegistro && arquivosDoRegistro.length) anexos.push(...arquivosDoRegistro)
+    completos.push(completo)
+    if (completo && Array.isArray(completo.arquivos)) anexos.push(...completo.arquivos)
   }
-  return anexos
+  return { registros: completos, anexos }
 }
 
-function buscarAnexosDeTextos(contratoId) {
-  return buscarAnexosDeSubrecurso(contratoId, 'textos')
+async function buscarAnexosDeSubrecurso(contratoId, subrecurso) {
+  return (await buscarRegistrosComArquivos(contratoId, subrecurso)).anexos
+}
+
+async function buscarTextosContrato(contratoId) {
+  const { registros, anexos } = await buscarRegistrosComArquivos(contratoId, 'textos')
+  return { textos: registros, anexos }
 }
 
 // Lookup POST — único sub-recurso do Betha Contratos que exige POST pra
@@ -913,18 +924,33 @@ async function buscarSubrecursoProcesso(sessao, processoId, subrecurso) {
 // campo inline `arquivos` do processo e dentro dos `textos` (cada texto traz
 // `arquivos` inline ou só no GET do texto individual). Mesma regra do Delta
 // Intelligence (`_coletarAnexosDeTextos`); sequencial pra não rajar a API.
-async function coletarAnexosProcesso(sessao, processoId, arquivosInline, textos) {
+// `textos` já vem completo por completarTextosProcesso.
+function coletarAnexosProcesso(arquivosInline, textos) {
   const anexos = Array.isArray(arquivosInline) ? [...arquivosInline] : []
   for (const texto of textos) {
-    let arquivos = Array.isArray(texto && texto.arquivos) ? texto.arquivos : null
-    if (!arquivos && texto && texto.id != null) {
-      const resp = await getCompras(sessao, `${ENDPOINT_PROCESSOS}/${limparId(processoId)}/textos/${limparId(texto.id)}`)
-      const detalhe = resp.ok ? await resp.json() : null
-      arquivos = Array.isArray(detalhe && detalhe.arquivos) ? detalhe.arquivos : []
-    }
-    anexos.push(...arquivos)
+    if (texto && Array.isArray(texto.arquivos)) anexos.push(...texto.arquivos)
   }
   return anexos
+}
+
+// Textos do processo com `arquivos` sempre preenchido — quando a listagem não
+// traz, o GET do texto individual completa o registro (pro documento "textos
+// do processo X" listar os arquivos de cada texto). Sequencial pra não rajar
+// a API; falha no detalhe deixa o texto como veio, com `arquivos` vazio.
+async function completarTextosProcesso(sessao, processoId, textos) {
+  const completos = []
+  for (const texto of textos) {
+    if (!texto || Array.isArray(texto.arquivos) || texto.id == null) {
+      completos.push(texto)
+      continue
+    }
+    const resp = await getCompras(sessao, `${ENDPOINT_PROCESSOS}/${limparId(processoId)}/textos/${limparId(texto.id)}`)
+    const detalhe = resp.ok ? await resp.json().catch(() => null) : null
+    const completo = { ...texto, ...(detalhe || {}) }
+    if (!Array.isArray(completo.arquivos)) completo.arquivos = []
+    completos.push(completo)
+  }
+  return completos
 }
 
 // Nome exibível de um participante (fornecedor) — o catálogo do sub-recurso
@@ -1071,7 +1097,13 @@ async function buscarDetalhesProcesso(processoId, arquivosInline) {
   }
 
   try {
-    subrecursos.anexos = await coletarAnexosProcesso(sessao, processoId, arquivosInline, subrecursos.textos || [])
+    subrecursos.textos = await completarTextosProcesso(sessao, processoId, subrecursos.textos || [])
+  } catch (e) {
+    avisos.push(`arquivos dos textos: ${String((e && e.message) || e)}`)
+  }
+
+  try {
+    subrecursos.anexos = coletarAnexosProcesso(arquivosInline, subrecursos.textos || [])
   } catch (e) {
     subrecursos.anexos = []
     avisos.push(`anexos: ${String((e && e.message) || e)}`)

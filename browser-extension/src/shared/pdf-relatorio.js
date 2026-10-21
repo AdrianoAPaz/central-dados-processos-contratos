@@ -14,8 +14,10 @@ import {
   montarSecoesInteracoesContabilidade,
   montarSecoesRecebimentos,
   montarDocumentoPublicacoes,
+  montarDocumentoTextos,
   tituloContrato,
   MENSAGEM_SEM_RESPONSAVEIS,
+  MENSAGEM_SEM_TEXTOS,
 } from './campos-relatorio.js'
 
 const MARGEM = 40
@@ -227,6 +229,25 @@ export function gerarPdfPublicacoes(documento) {
   return doc.output('blob')
 }
 
+// PDF "textos contrato X" — um bloco por texto da rotina "Textos" com todos
+// os campos, ou o aviso de que não há nenhum. `documento` é o retorno de
+// montarDocumentoTextos.
+export function gerarPdfTextos(documento) {
+  const { doc, cursor: inicioDoc } = novoDocumento(documento.titulo)
+  let cursor = inicioDoc
+  if (!documento.blocos.length) {
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'italic')
+    doc.text(MENSAGEM_SEM_TEXTOS, MARGEM, cursor)
+    doc.setFont('helvetica', 'normal')
+  }
+  for (const bloco of documento.blocos) {
+    cursor = desenharTitulo(doc, cursor, bloco.titulo, 12)
+    cursor = desenharTabelaCampos(doc, cursor, bloco.campos)
+  }
+  return doc.output('blob')
+}
+
 // Nome de arquivo a partir da descrição do documento (ex.: "aditivo 1" ->
 // "aditivo-1") — sem acento, minúsculo, só letras/números separados por
 // hífen.
@@ -269,6 +290,10 @@ export function listarDocumentosRelatorio(contrato) {
   // Sempre gerado, mesmo sem publicação (pedido do usuário: um por contratação).
   const publicacoes = montarDocumentoPublicacoes(contrato)
   documentos.push({ nome: `${slug(publicacoes.titulo)}.pdf`, gerar: () => gerarPdfPublicacoes(publicacoes) })
+
+  // Sempre gerado, mesmo sem textos (pedido do usuário: um por contratação).
+  const textos = montarDocumentoTextos(contrato)
+  documentos.push({ nome: `${slug(textos.titulo)}.pdf`, gerar: () => gerarPdfTextos(textos) })
 
   return documentos
 }

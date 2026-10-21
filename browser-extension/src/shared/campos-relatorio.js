@@ -283,6 +283,66 @@ export function montarDocumentoPublicacoes(c) {
   }
 }
 
+// Documento "textos contrato 12/2026" (pedido do usuário, 2026-10-21) — os
+// registros da rotina "Textos" ("Listando textos") da contratação, um bloco
+// por texto com TODOS os campos que a API devolveu (título, tipo, conteúdo,
+// arquivos anexados…). Gerado sempre, um por contratação, mesmo sem textos
+// (aí `blocos` vem vazio e o documento avisa) — mesmo princípio das
+// publicações. Os arquivos em si vão na pasta de anexos do zip.
+export const MENSAGEM_SEM_TEXTOS = 'Sem textos cadastrados'
+
+export function tituloTextos(c) {
+  return `textos ${tituloContrato(c)}`
+}
+
+export function montarDocumentoTextos(c) {
+  const textos = Array.isArray(c.textos) ? c.textos : []
+  // Entidades só com id resolvidas pelo contrato inteiro (o próprio
+  // `c.entidade` traz o nome).
+  const contexto = { entidades: indexarEntidades(c) }
+  return {
+    titulo: tituloTextos(c),
+    blocos: textos.map((raw, index) => ({ titulo: tituloBlocoTexto(raw, index), campos: camposTexto(raw, contexto) })),
+  }
+}
+
+// "texto 1 — Termo de Referência": o `titulo` do próprio texto, quando houver
+// — mesmo título dos blocos de textos do processo.
+export function tituloBlocoTexto(raw, index) {
+  const titulo = raw && typeof raw.titulo === 'string' ? raw.titulo.trim() : ''
+  return titulo ? `texto ${index + 1} — ${titulo}` : `texto ${index + 1}`
+}
+
+function camposTexto(raw, contexto) {
+  return Object.entries(raw || {}).map(([chave, valor]) => ({
+    label: formatarChave(chave),
+    valor: chave === 'conteudo' ? conteudoTexto(valor) : valorCampoDinamico(chave, valor, contexto),
+  }))
+}
+
+// `conteudo` do texto vem do editor do Betha — pode ser HTML (parágrafos,
+// quebras, negrito). No relatório vira texto corrido, uma linha por
+// parágrafo, sem as tags. Texto sem tag nenhuma passa direto.
+export function conteudoTexto(valor) {
+  if (typeof valor !== 'string') return valorTexto(valor)
+  if (!/<[a-z!/][^>]*>/i.test(valor)) return valor
+  const entidades = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }
+  return valor
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/\s*(p|div|li|h[1-6]|tr)\s*>/gi, '\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (original, codigo) => {
+      if (codigo[0] === '#') {
+        const n = codigo[1].toLowerCase() === 'x' ? parseInt(codigo.slice(2), 16) : parseInt(codigo.slice(1), 10)
+        return Number.isNaN(n) || n > 0x10ffff ? original : String.fromCodePoint(n)
+      }
+      return entidades[codigo.toLowerCase()] ?? original
+    })
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 // Todos os campos de `campos` (label + valor exibido), com as entidades só
 // com id resolvidas pelo que aparecer no registro inteiro (`raw`, que pode ter
 // mais chaves do que as exibidas — ex.: os itens que viram tabela própria).

@@ -56,6 +56,7 @@ model Contrato {
   responsaveis             ResponsavelContrato[]
   interacoesContabilidade  InteracaoContabilidade[]
   publicacoes              PublicacaoContrato[]
+  textos                   TextoContrato[]
 
   criadoEm     DateTime @default(now()) @map("criado_em")
   atualizadoEm DateTime @updatedAt @map("atualizado_em")
@@ -335,4 +336,24 @@ model PublicacaoContrato {
 
   @@unique([contratoId, ordem])
   @@map("publicacao_contrato")
+}
+
+// Um registro da rotina "Textos" ("Listando textos") do contrato no Betha
+// Contratos — buscado pela extensão em `contratacoes/{id}/textos` (GET
+// confirmado ao vivo no projeto irmão Delta Intelligence, 2026-07-07), já com
+// `arquivos` completos pelo GET do texto individual quando a listagem não
+// traz. Vira o documento "textos contrato X". Catálogo de campos não mapeado:
+// guardamos o JSON cru. `ordem` é a posição no array recebido.
+model TextoContrato {
+  id         String   @id @default(cuid())
+  contratoId String   @map("contrato_id")
+  contrato   Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+
+  ordem Int
+
+  dadosBrutos Json     @map("dados_brutos")
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  @@unique([contratoId, ordem])
+  @@map("texto_contrato")
 }
