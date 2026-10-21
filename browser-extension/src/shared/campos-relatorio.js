@@ -146,7 +146,7 @@ export function montarSecoesAditivos(aditivos) {
     const titulo = `aditivo ${identificador ?? numero}`
 
     const { itens, ...demaisCampos } = raw || {}
-    const campos = Object.entries(demaisCampos).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor) }))
+    const campos = camposDinamicos(demaisCampos, raw)
     const tabelaItens = montarTabelaItens(itens)
 
     return { numero, titulo, campos, tabelaItens }
@@ -173,7 +173,7 @@ export function montarSecoesSolicitacoesFornecimento(solicitacoes) {
     // "relatório").
     const titulo = `solicitação de fornecimento ${numero ?? index + 1}`
     const { itens, recebimentos: _recebimentos, ...demaisCampos } = raw || {}
-    const campos = Object.entries(demaisCampos).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor) }))
+    const campos = camposDinamicos(demaisCampos, raw)
     const tabelaItens = montarTabelaItens(itens)
     return { titulo, campos, tabelaItens }
   })
@@ -195,6 +195,7 @@ export function montarSecoesInteracoesContabilidade(interacoes) {
     const tipoAcao = raw && (raw.tipoAcaoDesc || raw.tipoAcao)
     const titulo = `interação contábil ${identificador}${tipoAcao ? ` (${tipoAcao})` : ''}`
     const campos = []
+    const contexto = { entidades: indexarEntidades(raw) }
     for (const [chave, valor] of Object.entries(raw || {})) {
       // `contratacao` vira "Sequencial da contratação" — só o sequencial
       // (injetado por popup.js, ver enriquecerSequenciaisContratacao), não o
@@ -206,7 +207,7 @@ export function montarSecoesInteracoesContabilidade(interacoes) {
         })
         continue
       }
-      campos.push({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor) })
+      campos.push({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor, contexto) })
       // Campo extra "Despesa" logo após "Desdobramento" — pedido do usuário
       // (2026-09-22): o número da despesa (ex.: 291), não o id interno
       // (`despesa.id`) que já aparece dentro de cada rateio. Não é uma chave
@@ -233,7 +234,7 @@ export function montarSecoesInteracoesContabilidade(interacoes) {
 // sentido como um campo de texto genérico.
 function montarCamposRecebimento(raw) {
   const { itens: _itens, ...demaisCampos } = raw || {}
-  return Object.entries(demaisCampos).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor) }))
+  return camposDinamicos(demaisCampos, raw)
 }
 
 // Recebimentos vinculados a CADA solicitação de fornecimento viram uma
@@ -277,9 +278,17 @@ export function montarDocumentoPublicacoes(c) {
     titulo: tituloPublicacoes(c),
     blocos: publicacoes.map((raw, index) => ({
       titulo: `publicação ${index + 1}`,
-      campos: Object.entries(raw || {}).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor) })),
+      campos: camposDinamicos(raw, raw),
     })),
   }
+}
+
+// Todos os campos de `campos` (label + valor exibido), com as entidades só
+// com id resolvidas pelo que aparecer no registro inteiro (`raw`, que pode ter
+// mais chaves do que as exibidas — ex.: os itens que viram tabela própria).
+function camposDinamicos(campos, raw) {
+  const contexto = { entidades: indexarEntidades(raw) }
+  return Object.entries(campos || {}).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor, contexto) }))
 }
 
 // Responsáveis do contrato (fiscal, gestor etc.) em seção própria — pedido
@@ -354,6 +363,9 @@ export function valorTexto(v) {
     // fornecedor da solicitação de fornecimento, pedido do usuário,
     // 2026-10-14) — sem isso cai no JSON.stringify do objeto inteiro.
     if (v.pessoa && typeof v.pessoa === 'object' && v.pessoa.nome != null) return String(v.pessoa.nome)
+    // Objeto vazio (ex.: `protocolo: {}` do processo) não tem nada pra
+    // conferir — fica em branco, igual a uma lista vazia.
+    if (!Object.keys(v).length) return ''
     // Valor não reconhecido fica como JSON cru de propósito, pra um analista
     // conferir manualmente — não trocar por texto vazio/simplificado.
     return JSON.stringify(v)
@@ -433,7 +445,54 @@ function nomeVeiculo(item) {
   return pessoa && pessoa.nome != null ? String(pessoa.nome) : valorTexto(item)
 }
 
-export function valorCampoDinamico(chave, valor) {
+// Entidade (`entidade`, `entidadeContrato`, `entidadeParticipante`…) — o
+// Betha costuma devolver só `{ id }` (ex.: "Entidade Contrato" da solicitação
+// de fornecimento, "Entidade" do processo; confirmado nos relatórios gerados
+// pelo usuário, 2026-10-21), mas o cadastro completo, com `nome`, aparece em
+// outro ponto do mesmo registro (a própria `entidade` da solicitação, a
+// entidade aninhada no histórico do processo...). `indexarEntidades` varre o
+// registro inteiro e monta id -> nome só a partir de objetos sob chaves de
+// entidade, pra não confundir com ids de outros cadastros.
+function ehChaveEntidade(chave) {
+  return typeof chave === 'string' && /^entidade/i.test(chave)
+}
+
+export function indexarEntidades(raiz) {
+  const nomes = new Map()
+  const visitar = (no, chave) => {
+    if (Array.isArray(no)) {
+      no.forEach((item) => visitar(item, chave))
+      return
+    }
+    if (!no || typeof no !== 'object') return
+    if (ehChaveEntidade(chave) && no.id != null && no.nome != null && !nomes.has(String(no.id))) {
+      nomes.set(String(no.id), String(no.nome))
+    }
+    for (const [k, v] of Object.entries(no)) visitar(v, k)
+  }
+  visitar(raiz, '')
+  return nomes
+}
+
+// `entidadeParticipante` (despesas do processo) embrulha a entidade em
+// `{ entidade: { id }, orgaoExterno }`. Devolve null quando não resolve, pra
+// cair no valorTexto (e no JSON cru).
+function nomeEntidade(valor, entidades) {
+  const alvo = valor.entidade && typeof valor.entidade === 'object' ? valor.entidade : valor
+  if (alvo.nome != null) return String(alvo.nome)
+  const nome = alvo.id != null && entidades ? entidades.get(String(alvo.id)) : undefined
+  if (nome) return nome
+  if (valor.orgaoExterno && typeof valor.orgaoExterno === 'object' && !valor.entidade) return valorTexto(valor.orgaoExterno)
+  return null
+}
+
+// `contexto.entidades` vem de indexarEntidades (opcional — sem ele, entidade
+// só com id fica como JSON cru).
+export function valorCampoDinamico(chave, valor, contexto = {}) {
+  if (ehChaveEntidade(chave) && valor && typeof valor === 'object' && !Array.isArray(valor)) {
+    const nome = nomeEntidade(valor, contexto.entidades)
+    if (nome != null) return nome
+  }
   if (ehChaveSolicitacaoFornecimento(chave) && valor != null) {
     return valorSolicitacaoFornecimento(valor)
   }

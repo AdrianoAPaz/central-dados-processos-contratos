@@ -1010,17 +1010,18 @@ async function buscarResponsavelCompras(sessao, id) {
   return null
 }
 
-// Substitui, em cada ato final, o `responsavel` (objeto só com id) pelo
-// cadastro completo. Um id por vez e com cache — vários atos costumam ter o
-// mesmo responsável. Falha ao buscar um responsável não derruba nada: o ato
-// fica como veio.
-async function enriquecerResponsaveisAtosFinais(sessao, atos) {
-  const cache = new Map()
+// Substitui, em cada registro (atos finais, pareceres), o `responsavel`
+// (objeto só com id) pelo cadastro completo. Um id por vez e com cache
+// (compartilhado entre os sub-recursos) — vários registros costumam ter o
+// mesmo responsável. Falha ao buscar um responsável não derruba nada: o
+// registro fica como veio. Os pareceres vêm no mesmo formato só com id
+// (confirmado no relatório do processo 623/2026, 2026-10-21).
+async function enriquecerResponsaveis(sessao, registros, cache) {
   const resultado = []
-  for (const ato of atos) {
-    const atual = ato && ato.responsavel
+  for (const registro of registros) {
+    const atual = registro && registro.responsavel
     if (!atual || typeof atual !== 'object' || atual.id == null || atual.pessoa) {
-      resultado.push(ato)
+      resultado.push(registro)
       continue
     }
     const chave = String(atual.id)
@@ -1028,7 +1029,7 @@ async function enriquecerResponsaveisAtosFinais(sessao, atos) {
       cache.set(chave, await buscarResponsavelCompras(sessao, atual.id).catch(() => null))
     }
     const completo = cache.get(chave)
-    resultado.push(completo ? { ...ato, responsavel: { ...atual, ...completo } } : ato)
+    resultado.push(completo ? { ...registro, responsavel: { ...atual, ...completo } } : registro)
   }
   return resultado
 }
@@ -1050,10 +1051,16 @@ async function buscarDetalhesProcesso(processoId, arquivosInline) {
     }
   }
 
-  try {
-    subrecursos.atosfinais = await enriquecerResponsaveisAtosFinais(sessao, subrecursos.atosfinais || [])
-  } catch (e) {
-    avisos.push(`responsáveis dos atos finais: ${String((e && e.message) || e)}`)
+  const responsaveis = new Map()
+  for (const [tipo, rotulo] of [
+    ['atosfinais', 'atos finais'],
+    ['pareceres', 'pareceres'],
+  ]) {
+    try {
+      subrecursos[tipo] = await enriquecerResponsaveis(sessao, subrecursos[tipo] || [], responsaveis)
+    } catch (e) {
+      avisos.push(`responsáveis dos ${rotulo}: ${String((e && e.message) || e)}`)
+    }
   }
 
   try {

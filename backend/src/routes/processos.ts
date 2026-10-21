@@ -4,7 +4,9 @@ import archiver from 'archiver';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma';
 import {
+  type ContextoCelula,
   formatarChave,
+  indexarEntidades,
   preencherPlanilhaCamposDinamicos,
   slug,
   valorCelulaDinamica,
@@ -175,22 +177,74 @@ processosRouter.get('/:id', async (req, res) => {
   res.json(processo);
 });
 
+// Processo dono dos registros (pra resolver as referências a ele) + índice de
+// entidades do processo inteiro (campos + sub-recursos).
+type ContextoProcesso = ContextoCelula & { idBetha: number; numeroFormatado: string | null };
+
+function contextoProcesso(processo: ProcessoCompleto): ContextoProcesso {
+  return {
+    idBetha: processo.idBetha,
+    numeroFormatado: processo.numeroFormatado,
+    entidades: indexarEntidades([processo.dadosBrutos, ...processo.subrecursos.map((s) => s.dadosBrutos)]),
+  };
+}
+
 // Valor exibido de um campo de processo/sub-recurso — além do que
 // valorCelulaDinamica já simplifica, a unidade de medida do Betha vem como
-// `{ simbolo }` (ex.: "UN") e cairia no JSON cru. Mesma regra do valorProcesso
-// da extensão (browser-extension/src/shared/campos-relatorio-processo.js).
-function valorCelulaProcesso(chave: string, valor: unknown): string | number {
+// `{ simbolo }` (ex.: "UN") e cairia no JSON cru, assim como os objetos de
+// valorObjetoProcesso. Mesma regra do valorProcesso da extensão
+// (browser-extension/src/shared/campos-relatorio-processo.js).
+function valorCelulaProcesso(chave: string, valor: unknown, contexto: ContextoProcesso): string | number {
   if (valor != null && typeof valor === 'object' && !Array.isArray(valor)) {
-    const simbolo = (valor as Record<string, unknown>).simbolo;
-    if (simbolo != null) return String(simbolo);
+    const obj = valor as Record<string, unknown>;
+    if (obj.simbolo != null) return String(obj.simbolo);
+    const especifico = valorObjetoProcesso(chave, obj, contexto);
+    if (especifico != null) return especifico;
   }
-  return valorCelulaDinamica(chave, valor);
+  return valorCelulaDinamica(chave, valor, contexto);
+}
+
+// Objetos do Compras que não têm descricao/nome e cairiam no JSON cru —
+// formatos vistos nos relatórios gerados pelo usuário (processos 229/2026 e
+// 623/2026, 2026-10-21). Devolve null quando o objeto não tem o dado
+// esperado, pra seguir pro valorCelulaDinamica (e o JSON cru, se nada servir).
+function valorObjetoProcesso(chave: string, valor: Record<string, unknown>, contexto: ContextoProcesso): string | null {
+  // `processoAdministrativo` (pareceres, textos, atos finais, histórico…) e
+  // `processoAdm` (despesas): é o próprio processo, repetido com flags
+  // internas — mostra o número dele.
+  if (/^processoAdm/i.test(chave)) {
+    if (valor.id != null && String(valor.id) === String(contexto.idBetha)) {
+      return contexto.numeroFormatado ?? `id ${contexto.idBetha}`;
+    }
+    if (valor.numeroProcesso != null) return String(valor.numeroProcesso);
+  }
+  if (chave === 'parametroExercicio' && valor.exercicio != null) return String(valor.exercicio);
+  // `contratacao` do processo: dados da licitação/contratação direta —
+  // modalidade + número sequencial (ex.: "Concorrência eletrônica 4/2026").
+  if (chave === 'contratacao' && valor.numeroSequencial != null) {
+    const numero =
+      valor.anoSequencial != null ? `${valor.numeroSequencial}/${valor.anoSequencial}` : String(valor.numeroSequencial);
+    const modalidade = valor.modalidade as Record<string, unknown> | null | undefined;
+    return modalidade?.descricao ? `${modalidade.descricao} ${numero}` : numero;
+  }
+  // `atoFinalBO` do histórico: o ato final que gerou a mudança de status.
+  if (/^atoFinal/i.test(chave) && (valor.tipoAtoDesc || valor.tipoAto)) return String(valor.tipoAtoDesc || valor.tipoAto);
+  // `statusAnterior` do histórico: o registro de histórico anterior inteiro —
+  // o status anterior é o status novo daquele registro.
+  if (chave === 'statusAnterior' && (valor.statusNovoDesc || valor.statusNovo)) {
+    return String(valor.statusNovoDesc || valor.statusNovo);
+  }
+  return null;
 }
 
 // Tabela com uma linha por registro e uma coluna por chave encontrada (união
 // das chaves de todos os registros, na ordem em que aparecem) — o catálogo de
 // campos dos sub-recursos não foi mapeado, então não há colunas fixas.
-function preencherPlanilhaTabelaDinamica(planilha: ExcelJS.Worksheet, registros: Array<{ dadosBrutos: unknown }>) {
+function preencherPlanilhaTabelaDinamica(
+  planilha: ExcelJS.Worksheet,
+  registros: Array<{ dadosBrutos: unknown }>,
+  contexto: ContextoProcesso,
+) {
   const chaves: string[] = [];
   for (const { dadosBrutos } of registros) {
     for (const chave of Object.keys((dadosBrutos ?? {}) as Record<string, unknown>)) {
@@ -203,7 +257,7 @@ function preencherPlanilhaTabelaDinamica(planilha: ExcelJS.Worksheet, registros:
 
   for (const { dadosBrutos } of registros) {
     const raw = (dadosBrutos ?? {}) as Record<string, unknown>;
-    planilha.addRow(Object.fromEntries(chaves.map((chave) => [chave, valorCelulaProcesso(chave, raw[chave])])));
+    planilha.addRow(Object.fromEntries(chaves.map((chave) => [chave, valorCelulaProcesso(chave, raw[chave], contexto)])));
   }
 }
 
@@ -234,12 +288,15 @@ function tituloProcesso(processo: { numeroFormatado: string | null; idBetha: num
 // uma aba por sub-recurso de TIPOS_EM_ABA_DO_PROCESSO que tenha registros.
 function workbookProcesso(processo: ProcessoCompleto): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
-  preencherPlanilhaCamposDinamicos(workbook.addWorksheet('Processo'), processo.dadosBrutos as Record<string, unknown>, valorCelulaProcesso);
+  const contexto = contextoProcesso(processo);
+  preencherPlanilhaCamposDinamicos(workbook.addWorksheet('Processo'), processo.dadosBrutos as Record<string, unknown>, (chave, valor) =>
+    valorCelulaProcesso(chave, valor, contexto),
+  );
 
   for (const tipo of TIPOS_EM_ABA_DO_PROCESSO) {
     const registros = processo.subrecursos.filter((s) => s.tipo === tipo);
     if (registros.length > 0) {
-      preencherPlanilhaTabelaDinamica(workbook.addWorksheet(TIPOS_SUBRECURSO[tipo].slice(0, 31)), registros);
+      preencherPlanilhaTabelaDinamica(workbook.addWorksheet(TIPOS_SUBRECURSO[tipo].slice(0, 31)), registros, contexto);
     }
   }
   return workbook;
@@ -247,9 +304,13 @@ function workbookProcesso(processo: ProcessoCompleto): ExcelJS.Workbook {
 
 // Workbook de UM sub-recurso: todos os registros numa tabela, com todas as
 // colunas que a API devolveu.
-function workbookSubrecurso(registros: Array<{ dadosBrutos: unknown }>, nomeAba: string): ExcelJS.Workbook {
+function workbookSubrecurso(
+  registros: Array<{ dadosBrutos: unknown }>,
+  nomeAba: string,
+  contexto: ContextoProcesso,
+): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
-  preencherPlanilhaTabelaDinamica(workbook.addWorksheet(nomeAba.slice(0, 31)), registros);
+  preencherPlanilhaTabelaDinamica(workbook.addWorksheet(nomeAba.slice(0, 31)), registros, contexto);
   return workbook;
 }
 
@@ -261,11 +322,12 @@ function workbookParticipantes(processo: ProcessoCompleto): ExcelJS.Workbook | n
   if (participantes.length === 0) return null;
 
   const workbook = new ExcelJS.Workbook();
-  preencherPlanilhaTabelaDinamica(workbook.addWorksheet(TIPOS_SUBRECURSO.participantes), participantes);
+  const contexto = contextoProcesso(processo);
+  preencherPlanilhaTabelaDinamica(workbook.addWorksheet(TIPOS_SUBRECURSO.participantes), participantes, contexto);
 
   const propostas = processo.subrecursos.filter((s) => s.tipo === 'propostas');
   if (propostas.length > 0) {
-    preencherPlanilhaTabelaDinamica(workbook.addWorksheet(TIPOS_SUBRECURSO.propostas), propostas);
+    preencherPlanilhaTabelaDinamica(workbook.addWorksheet(TIPOS_SUBRECURSO.propostas), propostas, contexto);
   }
   return workbook;
 }
@@ -298,10 +360,11 @@ processosRouter.get('/:id/relatorio', async (req, res) => {
     });
   }
 
+  const contexto = contextoProcesso(processo);
   for (const [tipo, rotulo] of Object.entries(TIPOS_EM_ARQUIVO_PROPRIO)) {
     const registros = processo.subrecursos.filter((s) => s.tipo === tipo);
     if (registros.length === 0) continue;
-    const buffer = await workbookParaBuffer(workbookSubrecurso(registros, TIPOS_SUBRECURSO[tipo]));
+    const buffer = await workbookParaBuffer(workbookSubrecurso(registros, TIPOS_SUBRECURSO[tipo], contexto));
     arquivoZip.append(buffer, { name: `${slug(`${rotulo} do ${titulo}`)}.xlsx` });
   }
 

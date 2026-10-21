@@ -30,7 +30,7 @@ export function gerarPdfProcesso(processo) {
     const registros = subrecurso(processo, chave)
     if (!registros.length) continue
 
-    const tabela = montarTabelaGenerica(registros, excluir)
+    const tabela = montarTabelaGenerica(registros, excluir, processo)
     cursor = desenharTitulo(doc, cursor, `${rotulo} (${registros.length})`, 13)
     cursor = desenharTabelaDinamica(doc, cursor, tabela)
 

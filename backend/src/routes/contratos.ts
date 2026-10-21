@@ -340,6 +340,9 @@ function valorCelula(v: unknown): string | number {
     // regra do valorTexto da extensão (campos-relatorio.js).
     const pessoa = obj.pessoa as Record<string, unknown> | null | undefined;
     if (pessoa && typeof pessoa === 'object' && pessoa.nome != null) return String(pessoa.nome);
+    // Objeto vazio (ex.: `protocolo: {}` do processo) não tem nada pra
+    // conferir — fica em branco, igual a uma lista vazia.
+    if (Object.keys(obj).length === 0) return '';
   }
   // Valor não reconhecido fica como JSON cru de propósito, pra um analista
   // conferir manualmente — não trocar por texto vazio/simplificado.
@@ -403,7 +406,56 @@ function nomeVeiculo(item: unknown): string | number {
   return nome != null ? String(nome) : valorCelula(item);
 }
 
-export function valorCelulaDinamica(chave: string, valor: unknown): string | number {
+// Entidade (`entidade`, `entidadeContrato`, `entidadeParticipante`…) — o
+// Betha costuma devolver só `{ id }`, mas o cadastro completo, com `nome`,
+// aparece em outro ponto do mesmo registro. `indexarEntidades` varre o
+// registro inteiro e monta id -> nome só a partir de objetos sob chaves de
+// entidade. Mesma lógica do lado da extensão
+// (browser-extension/src/shared/campos-relatorio.js).
+function ehChaveEntidade(chave: string): boolean {
+  return /^entidade/i.test(chave);
+}
+
+export function indexarEntidades(raiz: unknown): Map<string, string> {
+  const nomes = new Map<string, string>();
+  const visitar = (no: unknown, chave: string) => {
+    if (Array.isArray(no)) {
+      no.forEach((item) => visitar(item, chave));
+      return;
+    }
+    if (no == null || typeof no !== 'object') return;
+    const obj = no as Record<string, unknown>;
+    if (ehChaveEntidade(chave) && obj.id != null && obj.nome != null && !nomes.has(String(obj.id))) {
+      nomes.set(String(obj.id), String(obj.nome));
+    }
+    for (const [k, v] of Object.entries(obj)) visitar(v, k);
+  };
+  visitar(raiz, '');
+  return nomes;
+}
+
+// `entidadeParticipante` (despesas do processo) embrulha a entidade em
+// `{ entidade: { id }, orgaoExterno }`. Devolve null quando não resolve, pra
+// cair no valorCelula (e no JSON cru).
+function nomeEntidade(valor: Record<string, unknown>, entidades?: Map<string, string>): string | number | null {
+  const interna = valor.entidade;
+  const alvo = interna != null && typeof interna === 'object' ? (interna as Record<string, unknown>) : valor;
+  if (alvo.nome != null) return String(alvo.nome);
+  const nome = alvo.id != null ? entidades?.get(String(alvo.id)) : undefined;
+  if (nome) return nome;
+  if (valor.orgaoExterno != null && typeof valor.orgaoExterno === 'object' && interna == null) return valorCelula(valor.orgaoExterno);
+  return null;
+}
+
+export type ContextoCelula = { entidades?: Map<string, string> };
+
+// `contexto.entidades` vem de indexarEntidades (opcional — sem ele, entidade
+// só com id fica como JSON cru).
+export function valorCelulaDinamica(chave: string, valor: unknown, contexto: ContextoCelula = {}): string | number {
+  if (ehChaveEntidade(chave) && valor != null && typeof valor === 'object' && !Array.isArray(valor)) {
+    const nome = nomeEntidade(valor as Record<string, unknown>, contexto.entidades);
+    if (nome != null) return nome;
+  }
   if (chave === 'solicitacaoFornecimento' && valor != null) {
     return valorSolicitacaoFornecimento(valor);
   }
@@ -586,12 +638,17 @@ function preencherPlanilhaCampos(planilha: ExcelJS.Worksheet, linhas: Array<{ ca
 // solicitação de fornecimento — catálogo de campos desses sub-recursos não
 // confirmado ao vivo, então mostramos tudo que vier (mesmo motivo de
 // dadosBrutos no schema.prisma). `formatar` permite ao processo administrativo
-// usar a própria regra de valor (ver valorCelulaProcesso em processos.ts).
+// usar a própria regra de valor (ver valorCelulaProcesso em processos.ts); sem
+// ele, as entidades só com id são resolvidas pelo próprio registro.
 export function preencherPlanilhaCamposDinamicos(
   planilha: ExcelJS.Worksheet,
   raw: Record<string, unknown>,
-  formatar: (chave: string, valor: unknown) => string | number = valorCelulaDinamica,
+  formatar?: (chave: string, valor: unknown) => string | number,
 ) {
+  if (!formatar) {
+    const contexto = { entidades: indexarEntidades(raw) };
+    formatar = (chave, valor) => valorCelulaDinamica(chave, valor, contexto);
+  }
   preencherPlanilhaCampos(
     planilha,
     Object.entries(raw).map(([chave, valor]) => ({ campo: formatarChave(chave), valor: formatar(chave, valor) })),
@@ -706,6 +763,7 @@ function workbookInteracaoContabilidade(
   // objeto cru com flags/id interno que o Betha devolve. Logo após
   // "Desdobramento" entra a linha "Despesa" (número da despesa de cada
   // rateio), igual ao PDF da extensão.
+  const contexto = { entidades: indexarEntidades(raw) };
   preencherPlanilhaCampos(
     planilha,
     Object.entries(raw).flatMap(([chave, valor]) => {
@@ -714,7 +772,7 @@ function workbookInteracaoContabilidade(
           valor != null && typeof valor === 'object' ? (valor as Record<string, unknown>).sequencial : null;
         return [{ campo: 'Sequencial da contratação', valor: sequencial != null ? String(sequencial) : '' }];
       }
-      const linha = { campo: formatarChave(chave), valor: valorCelulaDinamica(chave, valor) };
+      const linha = { campo: formatarChave(chave), valor: valorCelulaDinamica(chave, valor, contexto) };
       return chave === 'desdobramento' ? [linha, { campo: 'Despesa', valor: valorNumeroDespesa(valor) }] : [linha];
     }),
   );

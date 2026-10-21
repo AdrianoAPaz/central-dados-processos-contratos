@@ -104,7 +104,7 @@ async function carregar() {
   const containerTabelas = document.getElementById('tabelas')
   for (const { chave, rotulo, excluir } of SUBRECURSOS_EM_TABELA) {
     const registros = subrecurso(processo, chave)
-    const tabela = criarTabelaDinamica(montarTabelaGenerica(registros, excluir))
+    const tabela = criarTabelaDinamica(montarTabelaGenerica(registros, excluir, processo))
     if (!tabela) continue
     const h2 = document.createElement('h2')
     h2.textContent = `${rotulo} (${registros.length})`
