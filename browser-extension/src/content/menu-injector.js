@@ -114,7 +114,9 @@ function espelharLayoutDoIrmao(li, ul, doadorPreferido) {
       aNosso.style.setProperty('color', csA.color, 'important')
       aNosso.style.setProperty('text-decoration', 'none', 'important')
     }
-  } catch {}
+  } catch {
+    // Copiar o estilo do menu é só cosmético: se falhar, o link fica com o estilo padrão.
+  }
 }
 
 function abrirPainel() {

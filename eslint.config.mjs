@@ -5,7 +5,15 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import prettier from 'eslint-config-prettier';
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/node_modules/**', '**/prisma/migrations/**'] },
+  {
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/prisma/migrations/**',
+      // Bibliotecas de terceiros já minificadas (jsPDF, autotable) — não é código nosso.
+      'browser-extension/src/vendor/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -55,6 +63,12 @@ export default tseslint.config(
         setTimeout: 'readonly',
         AbortSignal: 'readonly',
         TextEncoder: 'readonly',
+        getComputedStyle: 'readonly',
+        CustomEvent: 'readonly',
+        MutationObserver: 'readonly',
+        Headers: 'readonly',
+        Request: 'readonly',
+        XMLHttpRequest: 'readonly',
       },
     },
   },

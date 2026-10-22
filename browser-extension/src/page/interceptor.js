@@ -97,7 +97,7 @@
     return originalSetRequestHeader.apply(this, arguments)
   }
 
-  XHRProto.send = function (body) {
+  XHRProto.send = function (_body) {
     const info = this.__cd_url ? infoDaApi(this.__cd_url) : null
     if (info) {
       despachar(this.__cd_headers || {}, info)
