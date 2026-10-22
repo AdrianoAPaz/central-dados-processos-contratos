@@ -966,6 +966,39 @@ async function completarTextosProcesso(sessao, processoId, textos) {
   return completos
 }
 
+// Atas de registro de preço do processo com `arquivos` sempre preenchido e os
+// itens de cada ata em `itensAta` — pra pasta "Atas de Registro de Preço" do
+// zip (uma subpasta por ata, com o PDF dela e os anexos; pedido do usuário,
+// 2026-10-22). Mesma regra dos textos: quando a listagem não traz `arquivos`,
+// o GET da ata individual (`atasregistropreco/{id}`) completa o registro. Nem
+// esse GET nem `atasregistropreco/{id}/itens` foram confirmados ao vivo:
+// 404/400 ou falha deixam a ata como veio (sem anexos/itens). Sequencial pra
+// não rajar a API.
+async function completarAtasProcesso(sessao, processoId, atas) {
+  const caminhoAtas = `${ENDPOINT_PROCESSOS}/${limparId(processoId)}/${SUBRECURSOS_PROCESSO.atas}`
+  const completas = []
+  for (const ata of atas) {
+    if (!ata || ata.id == null) {
+      completas.push(ata)
+      continue
+    }
+    let completa = { ...ata }
+    if (!Array.isArray(completa.arquivos)) {
+      const resp = await getCompras(sessao, `${caminhoAtas}/${limparId(ata.id)}`).catch(() => null)
+      const detalhe = resp && resp.ok ? await resp.json().catch(() => null) : null
+      completa = { ...completa, ...(detalhe || {}) }
+      if (!Array.isArray(completa.arquivos)) completa.arquivos = []
+    }
+    completa.itensAta = await buscarSubrecursoProcesso(
+      sessao,
+      processoId,
+      `${SUBRECURSOS_PROCESSO.atas}/${limparId(ata.id)}/itens`,
+    ).catch(() => [])
+    completas.push(completa)
+  }
+  return completas
+}
+
 // Nome exibível de um participante (fornecedor) — o catálogo do sub-recurso
 // não foi mapeado, então tenta os lugares usuais do Betha.
 function nomeParticipante(participante) {
@@ -1113,6 +1146,12 @@ async function buscarDetalhesProcesso(processoId, arquivosInline) {
     subrecursos.textos = await completarTextosProcesso(sessao, processoId, subrecursos.textos || [])
   } catch (e) {
     avisos.push(`arquivos dos textos: ${String((e && e.message) || e)}`)
+  }
+
+  try {
+    subrecursos.atas = await completarAtasProcesso(sessao, processoId, subrecursos.atas || [])
+  } catch (e) {
+    avisos.push(`anexos das atas de registro de preço: ${String((e && e.message) || e)}`)
   }
 
   try {

@@ -66,8 +66,10 @@ histórico, textos, atas e anexos) usando a sua sessão logada e envia para `POS
 página **Processos administrativos** do frontend lista o que foi enviado e baixa os relatórios em
 `.zip` com um Excel por documento (`GET /api/processos/:id/relatorio`). Igual ao contrato, o botão **Gerar PDF** do
 popup abre uma página de relatório que gera um PDF por documento (o processo, com tabelas de itens, lotes e
-participantes, e um por sub-recurso: pareceres, sessões de julgamento, atos finais, despesas, histórico, atas e
-textos) e baixa tudo num único `.zip` junto com os anexos.
+participantes, e um por sub-recurso: pareceres, sessões de julgamento, atos finais, despesas, histórico e
+textos) e baixa tudo num único `.zip` junto com os anexos. Se o processo for de **registro de preço**, o zip ganha
+a pasta `Atas de Registro de Preço`, com uma subpasta por ata (`Ata 3-2026/`) contendo o PDF da ata (campos e
+itens) e a pasta `Anexos da ata 3-2026/` com os anexos dela.
 
 Pra funcionar, abra `compras.betha.cloud`, faça login e navegue por qualquer tela (é assim que a
 extensão captura a sessão). **No Compras o ano do processo é o exercício da sessão**: o popup mostra

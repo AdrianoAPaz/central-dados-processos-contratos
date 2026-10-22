@@ -3,7 +3,10 @@
 // gera um PDF por documento e baixa os anexos via service worker (que tem a
 // sessão do Compras), agrupando tudo num único .zip.
 import {
+  PASTA_ATAS_REGISTRO_PRECO,
   SUBRECURSOS_EM_TABELA,
+  ehRegistroPreco,
+  montarAtasRegistroPreco,
   montarCamposProcesso,
   montarDocumentosSubrecursos,
   montarTabelaGenerica,
@@ -11,7 +14,7 @@ import {
   subrecurso,
 } from '../shared/campos-relatorio-processo.js'
 import { criarZip } from '../shared/zip.js'
-import { listarDocumentosProcesso } from '../shared/pdf-relatorio-processo.js'
+import { listarDocumentosAta, listarDocumentosProcesso, listarDocumentosSemAtas } from '../shared/pdf-relatorio-processo.js'
 import { criarTabelaCampos, criarTabelaDinamica } from '../shared/dom-relatorio.js'
 import { listarDocumentosRelatorio } from '../shared/pdf-relatorio.js'
 import { baixarBlob, coletarArquivosPacote, nomeUnicoNoZip } from '../shared/pacote.js'
@@ -61,6 +64,41 @@ async function montarPacoteRelatorio(processo, anexos, container) {
     sistema: 'compras',
     lista,
   })
+
+  // Processo habilitado como registro de preço: pasta "Atas de Registro de
+  // Preço" junto dos arquivos do processo, com uma subpasta por ata (o PDF
+  // dela + a pasta com os anexos dela). Sem nenhuma ata ainda, a pasta sai só
+  // com o PDF avisando.
+  if (ehRegistroPreco(processo)) {
+    const prefixoAtas = `${prefixoProcesso}${PASTA_ATAS_REGISTRO_PRECO}/`
+    const atas = montarAtasRegistroPreco(processo)
+    if (!atas.length) {
+      baixados.push(
+        ...(await coletarArquivosPacote({
+          documentos: listarDocumentosSemAtas(processo),
+          anexos: [],
+          prefixo: prefixoAtas,
+          lista,
+        })),
+      )
+    }
+    const pastasAtas = new Set()
+    for (const ata of atas) {
+      const numeroPasta = ata.numero.replace(/[\\/:*?"<>|]+/g, '-')
+      const nomePasta = nomeUnicoNoZip(`Ata ${numeroPasta}`, pastasAtas)
+      baixados.push(
+        ...(await coletarArquivosPacote({
+          documentos: listarDocumentosAta(ata),
+          anexos: ata.anexos,
+          prefixo: `${prefixoAtas}${nomePasta}/`,
+          pasta: `Anexos da ata ${numeroPasta}`,
+          sistema: 'compras',
+          lista,
+          rotulo: `${nomePasta} — `,
+        })),
+      )
+    }
+  }
 
   const pastasUsadas = new Set()
   for (const contratacao of contratacoes) {

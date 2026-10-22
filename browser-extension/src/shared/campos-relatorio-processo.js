@@ -115,7 +115,7 @@ export const SUBRECURSOS_EM_DOCUMENTO = [
   { chave: 'atosfinais', rotulo: 'atos finais', singular: 'ato final' },
   { chave: 'despesas', rotulo: 'despesas', singular: 'despesa' },
   { chave: 'historico', rotulo: 'histórico', singular: 'registro' },
-  { chave: 'atas', rotulo: 'atas de registro de preços', singular: 'ata' },
+  { chave: 'atas', rotulo: 'atas de registro de preços', singular: 'ata', ocultar: ['itensAta'] },
   { chave: 'textos', rotulo: 'textos', singular: 'texto', vazio: MENSAGEM_SEM_TEXTOS },
 ]
 
@@ -298,16 +298,77 @@ export function montarDocumentosSubrecursos(p) {
 function montarDocumentosDemais(p, base) {
   return SUBRECURSOS_EM_DOCUMENTO.map((definicao) => ({ ...definicao, registros: subrecurso(p, definicao.chave) }))
     .filter(({ registros, vazio }) => registros.length || vazio)
-    .map(({ chave, registros, rotulo, singular, vazio }) => ({
+    .map(({ chave, registros, rotulo, singular, vazio, ocultar }) => ({
       chave,
       titulo: `${rotulo} do ${base}`,
       vazio,
       blocos: registros.map((raw, index) =>
         chave === 'textos'
           ? { titulo: tituloBlocoTexto(raw, index), campos: camposTextoProcesso(raw, p) }
-          : { titulo: `${singular} ${index + 1}`, campos: camposDe(raw, p) },
+          : { titulo: `${singular} ${index + 1}`, campos: camposDe(raw, p, ocultar) },
       ),
     }))
+}
+
+// Atas de registro de preço — pasta própria no zip do processo (pedido do
+// usuário, 2026-10-22): "Atas de Registro de Preço", com uma subpasta por ata
+// contendo o PDF dela e a pasta com os anexos dela.
+export const PASTA_ATAS_REGISTRO_PRECO = 'Atas de Registro de Preço'
+
+export const MENSAGEM_SEM_ATAS = 'Nenhuma ata de registro de preço cadastrada para este processo'
+
+function valorAfirmativo(valor) {
+  if (valor === true) return true
+  if (valor && typeof valor === 'object') return valorAfirmativo(valor.valor ?? valor.descricao ?? valor.value)
+  return typeof valor === 'string' && /^(s|sim|true)$/i.test(valor.trim())
+}
+
+// O processo foi habilitado como registro de preço? O nome do campo no Compras
+// não foi mapeado, então vale qualquer campo do processo (ou da `contratacao`
+// dele) cujo nome contenha "registro de preço" (`registroPreco`,
+// `sistemaRegistroPreco`…) ou seja `srp`, com valor afirmativo. Ter atas no
+// sub-recurso `atasregistropreco` também conta — só existe ata em processo de
+// registro de preço.
+export function ehRegistroPreco(p) {
+  if (subrecurso(p, 'atas').length) return true
+  return [p, p && p.contratacao].some(
+    (obj) =>
+      obj &&
+      typeof obj === 'object' &&
+      Object.entries(obj).some(([chave, valor]) => {
+        const n = normalizarChave(chave)
+        return (n.includes('registropreco') || n === 'srp') && valorAfirmativo(valor)
+      }),
+  )
+}
+
+// Número da ata pros nomes de pasta/arquivo — o catálogo das atas não foi
+// mapeado, então tenta os nomes usuais do Betha; sem nenhum, a ordem dela.
+export function numeroAta(raw, index) {
+  const r = raw || {}
+  const numero = r.numeroAta ?? r.numero ?? r.numeroTermo ?? r.sequencial
+  if (numero == null || numero === '') return String(index + 1)
+  const ano = r.anoAta ?? r.ano ?? r.exercicio
+  return ano != null && ano !== '' && !String(numero).includes('/') ? `${numero}/${ano}` : String(numero)
+}
+
+// Uma entrada por ata: título do PDF, campos (todos os que a API devolveu),
+// tabela dos itens da ata (`itensAta`, ver completarAtasProcesso no
+// service-worker.js) e os anexos (`arquivos` inline ou do GET da ata).
+export function montarAtasRegistroPreco(p) {
+  return subrecurso(p, 'atas').map((raw, index) => {
+    const numero = numeroAta(raw, index)
+    const itens = Array.isArray(raw && raw.itensAta) ? raw.itensAta : []
+    return {
+      numero,
+      titulo: `ata ${numero} do ${tituloProcesso(p)}`,
+      campos: camposDe(raw, p, ['itensAta']),
+      itens: montarTabelaGenerica(itens, COLUNAS_ITENS_EXCLUIDAS, p),
+      anexos: (Array.isArray(raw && raw.arquivos) ? raw.arquivos : [])
+        .map((a) => ({ ...a, origem: `Ata ${numero}` }))
+        .filter((a) => a && a.id),
+    }
+  })
 }
 
 // Campos de um texto do processo: `conteudo` (HTML do editor) vira texto
