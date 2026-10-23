@@ -530,9 +530,11 @@ function valorSolicitacaoFornecimento(valor) {
 // Campo "aditivo" da solicitação de fornecimento — pedido do usuário
 // (2026-10-23): o Betha devolve só `{ arquivos: [], id }`; popup.js completa
 // com o aditivo da listagem de alterações (ver enriquecerAditivosSolicitacoes).
-// Mostra o sequencial (o mesmo do documento "aditivo N") e o tipo, ex.:
-// "4 (Renovação Contratual)". Sem sequencial (aditivo não resolvido) cai no
-// valorTexto, que mantém o JSON cru pra conferência manual.
+// Mostra o sequencial (o mesmo do documento "aditivo N"), o tipo, a data e o
+// valor (pedido do usuário, 2026-10-23), ex.: "4 (Renovação Contratual) -
+// 27/11/2025 - R$ 50.510,16". Data/valor ausentes simplesmente não aparecem.
+// Sem sequencial (aditivo não resolvido) cai no valorTexto, que mantém o JSON
+// cru pra conferência manual.
 function ehChaveAditivo(chave) {
   return chave === 'aditivo'
 }
@@ -540,7 +542,15 @@ function ehChaveAditivo(chave) {
 function valorAditivo(valor) {
   if (valor.sequencial == null) return valorTexto(valor)
   const tipo = valor.tipoAditivo && valor.tipoAditivo.descricao
-  return tipo ? `${valor.sequencial} (${tipo})` : String(valor.sequencial)
+  const data = formatarData(valor.dataAditivoFonte || valor.dataAssinatura || valor.dataAditivo)
+  const montante = valor.valorAditivo ?? valor.valor
+  return [
+    tipo ? `${valor.sequencial} (${tipo})` : String(valor.sequencial),
+    data,
+    montante != null ? `R$ ${formatarValor(montante)}` : '',
+  ]
+    .filter(Boolean)
+    .join(' - ')
 }
 
 // Veículo de publicação (campo da publicação do contrato cuja chave contém
