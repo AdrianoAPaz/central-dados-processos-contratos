@@ -244,9 +244,11 @@ export function montarSecoesInteracoesContabilidade(interacoes) {
 // estilo de montarSecoesSolicitacoesFornecimento: `comprovantes`/`arquivos`
 // (arrays de objetos) já caem no fallback genérico de valorTexto. `itens` é
 // excluído daqui — vira tabela própria (ver montarTabelaItens), não faz
-// sentido como um campo de texto genérico.
+// sentido como um campo de texto genérico. `solFornec`/`solicitacaoFornecimento`
+// também ficam de fora (pedido do usuário, 2026-10-23): a solicitação já está
+// no título do documento ("recebimentos da solicitação de fornecimento X").
 function montarCamposRecebimento(raw) {
-  const { itens: _itens, ...demaisCampos } = raw || {}
+  const { itens: _itens, solFornec: _solFornec, solicitacaoFornecimento: _solicitacao, ...demaisCampos } = raw || {}
   return camposDinamicos(demaisCampos, raw)
 }
 

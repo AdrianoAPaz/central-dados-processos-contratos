@@ -889,7 +889,12 @@ function workbookRecebimentos(
     const raw = (recebimento.dadosBrutos ?? {}) as Record<string, unknown>;
     const numero = raw.numero != null ? String(raw.numero) : String(index + 1);
     const planilha = workbook.addWorksheet(`Recebimento ${numero}`.slice(0, 31));
-    preencherPlanilhaCamposDinamicos(planilha, raw);
+    // `solFornec`/`solicitacaoFornecimento` ficam de fora (pedido do usuário,
+    // 2026-10-23) — a solicitação já está no título do documento. Mesmo recorte
+    // de montarCamposRecebimento na extensão (entidades resolvidas pelo registro inteiro).
+    const { solFornec: _solFornec, solicitacaoFornecimento: _solicitacao, ...camposRecebimento } = raw;
+    const contexto = { entidades: indexarEntidades(raw) };
+    preencherPlanilhaCamposDinamicos(planilha, camposRecebimento, (chave, valor) => valorCelulaDinamica(chave, valor, contexto));
 
     if (recebimento.itens.length > 0) {
       const planilhaItens = workbook.addWorksheet(`Recebimento ${numero} - Itens`.slice(0, 31));
