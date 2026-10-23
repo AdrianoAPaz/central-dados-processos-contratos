@@ -227,6 +227,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  // Formas de pagamento cadastradas (id -> descrição, ex.: "30 DIAS APÓS
+  // ENTREGA"). A solicitação de fornecimento só traz o id; endpoint informado
+  // pelo usuário (2026-10-23): GET formaspagamento?filter=&limit=20&offset=0&sort=.
+  if (message.type === 'buscar-formas-pagamento') {
+    buscarSubrecurso('formaspagamento')
+      .then((formas) => sendResponse({ formas }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
   // Veículos de publicação cadastrados (Diário Oficial, jornal…), pra
   // resolver o veículo das publicações do contrato, que vem só com o id.
   // Fica na API do Compras, não na do Contratos — endpoint informado pelo
