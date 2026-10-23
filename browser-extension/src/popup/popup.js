@@ -329,6 +329,33 @@ function separarAlteracoes(alteracoes, aditivosConhecidos) {
   return { apostilamentos, aditivosExtras }
 }
 
+// O campo `aditivo` da solicitação de fornecimento vem só com `{ arquivos: [],
+// id }` (pedido do usuário, 2026-10-23) — os dados do aditivo (sequencial,
+// tipo, valor…) estão na listagem de alterações do contrato
+// (contratacoes/{id}/alteracoes, `idAlteracao` = id do aditivo). Resolve pelo
+// id usando os aditivos que já temos (listagem de aditivos + alterações; as
+// alterações, formato confirmado ao vivo, têm prioridade). Best-effort: id que
+// não aparece em nenhuma das duas fica como veio.
+function enriquecerAditivosSolicitacoes(solicitacoes, aditivosDaListagem, alteracoes) {
+  const porId = new Map()
+  for (const aditivo of aditivosDaListagem) {
+    if (aditivo && aditivo.id != null) porId.set(String(aditivo.id), aditivo)
+  }
+  for (const alteracao of alteracoes) {
+    if (!alteracao || String(alteracao.tipoAlteracao || '').toUpperCase() !== 'ADITIVO') continue
+    const aditivo = achatarAlteracao(alteracao)
+    const id = aditivo.id ?? alteracao.idAlteracao
+    if (id != null) porId.set(String(id), aditivo)
+  }
+
+  return solicitacoes.map((sf) => {
+    const valor = sf && sf.aditivo
+    const completo = porId.get(idDoValor(valor))
+    if (!completo) return sf
+    return { ...sf, aditivo: typeof valor === 'object' ? { ...valor, ...completo } : completo }
+  })
+}
+
 async function comDetalhes(contrato) {
   if (contrato.id == null) return contrato
 
@@ -392,7 +419,11 @@ async function comDetalhes(contrato) {
   // buscado por cima de cada recebimento. Endpoints confirmados (ver
   // service-worker.js): erro em qualquer um interrompe o relatório, mesmo
   // critério das solicitações de fornecimento em si.
-  const solicitacoes = await enriquecerResponsaveis(await enriquecerDescricoesCadastros(respSf.solicitacoes || []))
+  const solicitacoes = enriquecerAditivosSolicitacoes(
+    await enriquecerResponsaveis(await enriquecerDescricoesCadastros(respSf.solicitacoes || [])),
+    aditivosDaListagem,
+    alteracoes,
+  )
   const solicitacoesComRecebimentos = await Promise.all(
     solicitacoes.map(async (sf) => {
       if (sf.id == null) return { ...sf, recebimentos: [] }

@@ -527,6 +527,22 @@ function valorSolicitacaoFornecimento(valor) {
     .join(', ')
 }
 
+// Campo "aditivo" da solicitação de fornecimento — pedido do usuário
+// (2026-10-23): o Betha devolve só `{ arquivos: [], id }`; popup.js completa
+// com o aditivo da listagem de alterações (ver enriquecerAditivosSolicitacoes).
+// Mostra o sequencial (o mesmo do documento "aditivo N") e o tipo, ex.:
+// "4 (Renovação Contratual)". Sem sequencial (aditivo não resolvido) cai no
+// valorTexto, que mantém o JSON cru pra conferência manual.
+function ehChaveAditivo(chave) {
+  return chave === 'aditivo'
+}
+
+function valorAditivo(valor) {
+  if (valor.sequencial == null) return valorTexto(valor)
+  const tipo = valor.tipoAditivo && valor.tipoAditivo.descricao
+  return tipo ? `${valor.sequencial} (${tipo})` : String(valor.sequencial)
+}
+
 // Veículo de publicação (campo da publicação do contrato cuja chave contém
 // "veiculo") — pedido do usuário (2026-10-19): o nome exibido é o do
 // fornecedor do veículo, `fornecedor.pessoa.nome` (ex.: "MUNICIPIO DE ARROIO
@@ -591,6 +607,9 @@ export function valorCampoDinamico(chave, valor, contexto = {}) {
   }
   if (ehChaveSolicitacaoFornecimento(chave) && valor != null) {
     return valorSolicitacaoFornecimento(valor)
+  }
+  if (ehChaveAditivo(chave) && valor && typeof valor === 'object' && !Array.isArray(valor)) {
+    return valorAditivo(valor)
   }
   if (ehChaveVeiculo(chave) && valor && typeof valor === 'object') {
     return Array.isArray(valor) ? valor.map(nomeVeiculo).join(', ') : nomeVeiculo(valor)
