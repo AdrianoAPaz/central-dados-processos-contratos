@@ -705,6 +705,7 @@ export function preencherPlanilhaCamposDinamicos(
   planilha: ExcelJS.Worksheet,
   raw: Record<string, unknown>,
   formatar?: (chave: string, valor: unknown) => string | number,
+  rotulos: Record<string, string> = {},
 ) {
   if (!formatar) {
     const contexto = { entidades: indexarEntidades(raw) };
@@ -712,7 +713,10 @@ export function preencherPlanilhaCamposDinamicos(
   }
   preencherPlanilhaCampos(
     planilha,
-    Object.entries(raw).map(([chave, valor]) => ({ campo: formatarChave(chave), valor: formatar(chave, valor) })),
+    Object.entries(raw).map(([chave, valor]) => ({
+      campo: rotulos[chave] ?? formatarChave(chave),
+      valor: formatar(chave, valor),
+    })),
   );
 }
 
@@ -989,6 +993,7 @@ function conteudoTexto(valor: unknown): string | number {
 export function workbookTextos(
   textos: Array<{ dadosBrutos: unknown }>,
   formatar?: (raw: Record<string, unknown>, chave: string, valor: unknown) => string | number,
+  rotulos?: Record<string, string>,
 ): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
   if (textos.length === 0) {
@@ -1001,8 +1006,11 @@ export function workbookTextos(
     const valorDoCampo = formatar
       ? (chave: string, valor: unknown) => formatar(raw, chave, valor)
       : (chave: string, valor: unknown) => valorCelulaDinamica(chave, valor, contexto);
-    preencherPlanilhaCamposDinamicos(workbook.addWorksheet(nomeAbaTexto(raw, index)), raw, (chave, valor) =>
-      chave === 'conteudo' ? conteudoTexto(valor) : valorDoCampo(chave, valor),
+    preencherPlanilhaCamposDinamicos(
+      workbook.addWorksheet(nomeAbaTexto(raw, index)),
+      raw,
+      (chave, valor) => (chave === 'conteudo' ? conteudoTexto(valor) : valorDoCampo(chave, valor)),
+      rotulos,
     );
   });
   return workbook;
@@ -1119,8 +1127,20 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
 
   // Entidades só com id resolvidas pelo contrato inteiro (igual ao PDF).
   const entidadesContrato = indexarEntidades([contrato.dadosBrutos, ...contrato.textos.map((t) => t.dadosBrutos)]);
-  const textosXlsx = workbookTextos(contrato.textos, (_raw, chave, valor) =>
-    valorCelulaDinamica(chave, valor, { entidades: entidadesContrato }),
+  // `contratacao` vira "Sequencial da contratação" — só o sequencial (injetado
+  // pela extensão, ver enriquecerSequenciaisContratacao em popup.js), igual ao
+  // PDF e às interações contábeis.
+  const textosXlsx = workbookTextos(
+    contrato.textos,
+    (_raw, chave, valor) => {
+      if (chave === 'contratacao') {
+        const sequencial =
+          valor != null && typeof valor === 'object' ? (valor as Record<string, unknown>).sequencial : null;
+        return sequencial != null ? String(sequencial) : '';
+      }
+      return valorCelulaDinamica(chave, valor, { entidades: entidadesContrato });
+    },
+    { contratacao: 'Sequencial da contratação' },
   );
   arquivoZip.append(await workbookParaBuffer(textosXlsx), {
     name: `${slug(tituloTextos(contrato))}.xlsx`,

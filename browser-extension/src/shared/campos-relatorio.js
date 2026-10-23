@@ -327,10 +327,21 @@ export function tituloBlocoTexto(raw, index) {
 }
 
 function camposTexto(raw, contexto) {
-  return Object.entries(raw || {}).map(([chave, valor]) => ({
-    label: formatarChave(chave),
-    valor: chave === 'conteudo' ? conteudoTexto(valor) : valorCampoDinamico(chave, valor, contexto),
-  }))
+  return Object.entries(raw || {}).map(([chave, valor]) => {
+    // `contratacao` vira "Sequencial da contratação" — só o sequencial
+    // (injetado por popup.js, ver enriquecerSequenciaisContratacao), não o
+    // objeto cru com o id interno (pedido do usuário, 2026-10-23).
+    if (chave === 'contratacao') {
+      return {
+        label: 'Sequencial da contratação',
+        valor: valor && typeof valor === 'object' && valor.sequencial != null ? String(valor.sequencial) : '',
+      }
+    }
+    return {
+      label: formatarChave(chave),
+      valor: chave === 'conteudo' ? conteudoTexto(valor) : valorCampoDinamico(chave, valor, contexto),
+    }
+  })
 }
 
 // `conteudo` do texto vem do editor do Betha — pode ser HTML (parágrafos,

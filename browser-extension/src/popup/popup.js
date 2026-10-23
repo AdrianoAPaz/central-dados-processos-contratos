@@ -218,8 +218,8 @@ async function enriquecerResponsaveis(registros) {
   return resultado
 }
 
-// `contratacao` de cada interação contábil só traz o id interno da
-// contratação — o relatório mostra o sequencial dela (o mesmo do documento do
+// `contratacao` de cada interação contábil (e de cada texto do contrato) só
+// traz o id interno da contratação — o relatório mostra o sequencial dela (o mesmo do documento do
 // contrato; pedido do usuário, 2026-10-14). Quando o id é o do próprio
 // contrato (o caso normal, já que as interações vêm de
 // contratacoes/{id}/interacaocontabil) usa o sequencial que já temos; só vai
@@ -476,7 +476,9 @@ async function comDetalhes(contrato) {
     solicitacoesFornecimento: solicitacoesComRecebimentos,
     anexosTextos: respAnexosTextos.anexos || [],
     // Registros da rotina "Textos" — documento "textos contrato X".
-    textos: respAnexosTextos.textos || [],
+    // `contratacao` de cada texto também só traz o id interno — vira o
+    // sequencial (ver enriquecerSequenciaisContratacao).
+    textos: await enriquecerSequenciaisContratacao(respAnexosTextos.textos || [], contrato),
     anexosPublicacao: (respAnexosPublicacao && !respAnexosPublicacao.erro && respAnexosPublicacao.anexos) || [],
     publicacoes: await enriquecerVeiculosPublicacao((respPublicacoes && !respPublicacoes.erro && respPublicacoes.publicacoes) || []),
     responsaveis: respResponsaveis.responsaveis || [],
