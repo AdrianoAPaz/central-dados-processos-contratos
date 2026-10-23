@@ -429,10 +429,11 @@ function valorNumeroDespesa(valor: unknown): string {
     .join(', ');
 }
 
-// Número do empenho (ex.: 5426) gerado quando a interação é contabilizada:
+// Número do empenho gerado quando a interação é contabilizada:
 // `empenhoContabilidadeBO.numeroEmpenho` de cada rateio do `desdobramento`
-// (ou `numeroEmpenho` direto no rateio, no "Empenhar"). Interação não
-// contabilizada fica em branco. Mesma lógica do lado da extensão
+// (ou `numeroEmpenho` direto no rateio, no "Empenhar"), exibido como
+// número/ano (ex.: 417/2025) com `empenhoContabilidadeBO.anoEmpenho`.
+// Interação não contabilizada fica em branco. Mesma lógica do lado da extensão
 // (browser-extension/src/shared/campos-relatorio.js).
 function valorNumeroEmpenho(raw: Record<string, unknown>): string {
   const situacao = raw.situacao ?? raw.situacaoDesc;
@@ -442,10 +443,13 @@ function valorNumeroEmpenho(raw: Record<string, unknown>): string {
     .map((item) => {
       if (item == null || typeof item !== 'object') return null;
       const rateio = item as Record<string, unknown>;
-      const bo = rateio.empenhoContabilidadeBO;
-      return bo != null && typeof bo === 'object' && (bo as Record<string, unknown>).numeroEmpenho != null
-        ? (bo as Record<string, unknown>).numeroEmpenho
-        : rateio.numeroEmpenho;
+      const bo =
+        rateio.empenhoContabilidadeBO != null && typeof rateio.empenhoContabilidadeBO === 'object'
+          ? (rateio.empenhoContabilidadeBO as Record<string, unknown>)
+          : null;
+      const numero = bo?.numeroEmpenho != null ? bo.numeroEmpenho : rateio.numeroEmpenho;
+      if (numero == null) return null;
+      return bo?.anoEmpenho != null ? `${String(numero)}/${String(bo.anoEmpenho)}` : String(numero);
     })
     .filter((v) => v != null);
   return [...new Set(numeros)].join(', ');

@@ -493,6 +493,8 @@ function valorNumeroDespesa(valor) {
 // rateio do `desdobramento` traz `empenhoContabilidadeBO.numeroEmpenho`
 // (presente em empenhar/liquidar/pagar) e, só no "Empenhar", também
 // `numeroEmpenho` direto no rateio. Interação não contabilizada fica em branco.
+// Exibido como número/ano (ex.: 417/2025), com o ano vindo de
+// `empenhoContabilidadeBO.anoEmpenho` — pedido do usuário (2026-10-23).
 function interacaoContabilizada(raw) {
   const situacao = raw && (raw.situacao || raw.situacaoDesc)
   return typeof situacao === 'string' && /^contabilizad/i.test(situacao.trim())
@@ -505,7 +507,10 @@ function valorNumeroEmpenho(raw) {
     .map((item) => {
       if (!item || typeof item !== 'object') return null
       const bo = item.empenhoContabilidadeBO
-      return bo && typeof bo === 'object' && bo.numeroEmpenho != null ? bo.numeroEmpenho : item.numeroEmpenho
+      const boValido = bo && typeof bo === 'object'
+      const numero = boValido && bo.numeroEmpenho != null ? bo.numeroEmpenho : item.numeroEmpenho
+      if (numero == null) return null
+      return boValido && bo.anoEmpenho != null ? `${numero}/${bo.anoEmpenho}` : String(numero)
     })
     .filter((v) => v != null)
   return [...new Set(numeros)].join(', ')
