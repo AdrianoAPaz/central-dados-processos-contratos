@@ -493,6 +493,8 @@ function valorNumeroDespesa(valor) {
 // rateio do `desdobramento` traz `empenhoContabilidadeBO.numeroEmpenho`
 // (presente em empenhar/liquidar/pagar) e, só no "Empenhar", também
 // `numeroEmpenho` direto no rateio. Interação não contabilizada fica em branco.
+// Exibido como número/ano (ex.: 417/2025), com o ano vindo de
+// `empenhoContabilidadeBO.anoEmpenho` — pedido do usuário (2026-10-23).
 function interacaoContabilizada(raw) {
   const situacao = raw && (raw.situacao || raw.situacaoDesc)
   return typeof situacao === 'string' && /^contabilizad/i.test(situacao.trim())
@@ -505,7 +507,10 @@ function valorNumeroEmpenho(raw) {
     .map((item) => {
       if (!item || typeof item !== 'object') return null
       const bo = item.empenhoContabilidadeBO
-      return bo && typeof bo === 'object' && bo.numeroEmpenho != null ? bo.numeroEmpenho : item.numeroEmpenho
+      const boValido = bo && typeof bo === 'object'
+      const numero = boValido && bo.numeroEmpenho != null ? bo.numeroEmpenho : item.numeroEmpenho
+      if (numero == null) return null
+      return boValido && bo.anoEmpenho != null ? `${numero}/${bo.anoEmpenho}` : String(numero)
     })
     .filter((v) => v != null)
   return [...new Set(numeros)].join(', ')
@@ -525,6 +530,32 @@ function valorSolicitacaoFornecimento(valor) {
     .map((item) => (item && typeof item === 'object' ? item.numeroAno : item))
     .filter((v) => v != null)
     .join(', ')
+}
+
+// Campo "aditivo" da solicitação de fornecimento — pedido do usuário
+// (2026-10-23): o Betha devolve só `{ arquivos: [], id }`; popup.js completa
+// com o aditivo da listagem de alterações (ver enriquecerAditivosSolicitacoes).
+// Mostra o sequencial (o mesmo do documento "aditivo N"), o tipo, a data e o
+// valor (pedido do usuário, 2026-10-23), ex.: "4 (Renovação Contratual) -
+// 27/11/2025 - R$ 50.510,16". Data/valor ausentes simplesmente não aparecem.
+// Sem sequencial (aditivo não resolvido) cai no valorTexto, que mantém o JSON
+// cru pra conferência manual.
+function ehChaveAditivo(chave) {
+  return chave === 'aditivo'
+}
+
+function valorAditivo(valor) {
+  if (valor.sequencial == null) return valorTexto(valor)
+  const tipo = valor.tipoAditivo && valor.tipoAditivo.descricao
+  const data = formatarData(valor.dataAditivoFonte || valor.dataAssinatura || valor.dataAditivo)
+  const montante = valor.valorAditivo ?? valor.valor
+  return [
+    tipo ? `${valor.sequencial} (${tipo})` : String(valor.sequencial),
+    data,
+    montante != null ? `R$ ${formatarValor(montante)}` : '',
+  ]
+    .filter(Boolean)
+    .join(' - ')
 }
 
 // Veículo de publicação (campo da publicação do contrato cuja chave contém
@@ -591,6 +622,9 @@ export function valorCampoDinamico(chave, valor, contexto = {}) {
   }
   if (ehChaveSolicitacaoFornecimento(chave) && valor != null) {
     return valorSolicitacaoFornecimento(valor)
+  }
+  if (ehChaveAditivo(chave) && valor && typeof valor === 'object' && !Array.isArray(valor)) {
+    return valorAditivo(valor)
   }
   if (ehChaveVeiculo(chave) && valor && typeof valor === 'object') {
     return Array.isArray(valor) ? valor.map(nomeVeiculo).join(', ') : nomeVeiculo(valor)
