@@ -89,7 +89,7 @@ export function ContratosPage() {
                   <span>{c.fornecedorNome}</span> · <span>{c.situacaoDesc}</span>
                 </div>
                 <a className="btn-ghost" href={`/api/contratos/${c.id}/relatorio`}>
-                  Baixar relatório (Excel)
+                  Baixar relatórios (.zip com Excel por documento)
                 </a>
               </li>
             ))}

@@ -5,7 +5,15 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import prettier from 'eslint-config-prettier';
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/node_modules/**', '**/prisma/migrations/**'] },
+  {
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/prisma/migrations/**',
+      // Bibliotecas de terceiros já minificadas (jsPDF, autotable) — não é código nosso.
+      'browser-extension/src/vendor/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -34,6 +42,34 @@ export default tseslint.config(
     files: ['backend/**/*.ts'],
     languageOptions: {
       globals: { process: 'readonly', console: 'readonly' },
+    },
+  },
+  {
+    // Globals de extensão Chrome — nunca configurados desde que a pasta foi
+    // adicionada (commit "Adiciona extensao Chrome de coleta"), por isso todo
+    // arquivo aqui falhava no-undef pra document/chrome/fetch/etc.
+    files: ['browser-extension/**/*.js'],
+    languageOptions: {
+      globals: {
+        chrome: 'readonly',
+        document: 'readonly',
+        window: 'readonly',
+        fetch: 'readonly',
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
+        Blob: 'readonly',
+        atob: 'readonly',
+        btoa: 'readonly',
+        setTimeout: 'readonly',
+        AbortSignal: 'readonly',
+        TextEncoder: 'readonly',
+        getComputedStyle: 'readonly',
+        CustomEvent: 'readonly',
+        MutationObserver: 'readonly',
+        Headers: 'readonly',
+        Request: 'readonly',
+        XMLHttpRequest: 'readonly',
+      },
     },
   },
   prettier,

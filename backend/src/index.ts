@@ -3,14 +3,18 @@ import path from 'node:path';
 import express from 'express';
 import { env } from './env';
 import { contratosRouter } from './routes/contratos';
+import { processosRouter } from './routes/processos';
 
 const app = express();
 
-app.use(express.json());
+// 10mb (o padrão é 100kb): a extensão envia o registro completo com todos os
+// sub-recursos (itens, fornecedores, documentos…) num único POST.
+app.use(express.json({ limit: '10mb' }));
 
 app.get('/healthz', (_req, res) => res.status(200).send('ok'));
 
 app.use('/api/contratos', contratosRouter);
+app.use('/api/processos', processosRouter);
 
 // Em produção, o backend também serve o build do frontend (CLAUDE.md 1.2) —
 // um processo só, uma porta só, exatamente como o deploy-guide.md espera.
