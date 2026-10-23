@@ -237,6 +237,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  // Prazos de entrega cadastrados (id -> descrição). A solicitação de
+  // fornecimento só traz o id; endpoint informado pelo usuário (2026-10-23):
+  // GET prazosentrega?filter=&limit=20&offset=0&sort=.
+  if (message.type === 'buscar-prazos-entrega') {
+    buscarSubrecurso('prazosentrega')
+      .then((prazos) => sendResponse({ prazos }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
   // Veículos de publicação cadastrados (Diário Oficial, jornal…), pra
   // resolver o veículo das publicações do contrato, que vem só com o id.
   // Fica na API do Compras, não na do Contratos — endpoint informado pelo

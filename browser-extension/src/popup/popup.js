@@ -149,6 +149,7 @@ const RESOLVEDORES_DESCRICAO = [
   { chave: /^loca(l|is)entrega/i, mensagem: 'buscar-locais-entrega', lista: 'locais' },
   { chave: /^tipoobjeto/i, mensagem: 'buscar-tipos-objeto', lista: 'tipos' },
   { chave: /^formas?pagamento/i, mensagem: 'buscar-formas-pagamento', lista: 'formas' },
+  { chave: /^prazos?(de)?entrega/i, mensagem: 'buscar-prazos-entrega', lista: 'prazos' },
 ]
 
 // Valor do campo pode ser o objeto do cadastro ({ id, ... }) ou só o id.
