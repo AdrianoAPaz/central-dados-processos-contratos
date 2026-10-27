@@ -49,10 +49,12 @@ async function montarPacoteRelatorio(processo, anexos, container) {
 
   const numero = numeroParaArquivo(processo)
   const contratacoes = Array.isArray(processo.contratacoesVinculadas) ? processo.contratacoesVinculadas : []
-  // Sem contratações vinculadas o zip continua só com os arquivos do processo,
-  // soltos na raiz. Com elas, o zip ganha duas pastas: a do processo e a de
+  const registroPreco = ehRegistroPreco(processo)
+  // Sem contratações vinculadas nem atas o zip continua só com os arquivos do
+  // processo, soltos na raiz. Com elas, o zip ganha pastas irmãs na raiz: a do
+  // processo, a de "Atas de Registro de Preço" (uma subpasta por ata) e a de
   // "Contratações" (uma subpasta por contratação, com os PDFs e anexos dela).
-  const prefixoProcesso = contratacoes.length ? `Proc Adm ${numero}/` : ''
+  const prefixoProcesso = contratacoes.length || registroPreco ? `Proc Adm ${numero}/` : ''
 
   // Um PDF por documento (o processo e cada sub-recurso com registros) — cada
   // um gera e falha independente dos demais.
@@ -66,11 +68,11 @@ async function montarPacoteRelatorio(processo, anexos, container) {
   })
 
   // Processo habilitado como registro de preço: pasta "Atas de Registro de
-  // Preço" junto dos arquivos do processo, com uma subpasta por ata (o PDF
-  // dela + a pasta com os anexos dela). Sem nenhuma ata ainda, a pasta sai só
-  // com o PDF avisando.
-  if (ehRegistroPreco(processo)) {
-    const prefixoAtas = `${prefixoProcesso}${PASTA_ATAS_REGISTRO_PRECO}/`
+  // Preço" na raiz do zip, ao lado de "Contratações", com uma subpasta por ata
+  // (o PDF dela + a pasta com os anexos dela). Sem nenhuma ata ainda, a pasta
+  // sai só com o PDF avisando.
+  if (registroPreco) {
+    const prefixoAtas = `${PASTA_ATAS_REGISTRO_PRECO}/`
     const atas = montarAtasRegistroPreco(processo)
     if (!atas.length) {
       baixados.push(
