@@ -392,6 +392,16 @@ function ehChaveOrganograma(chave: string): boolean {
   return /organograma/i.test(chave);
 }
 
+// Código do organograma como linha própria ("Código do organograma"), logo
+// abaixo do "Organograma" — o objeto do Betha traz `numero` (ex.:
+// "0200300203"). Mesma lógica do lado da extensão (codigoOrganograma em
+// campos-relatorio.js).
+function codigoOrganograma(valor: unknown): string {
+  if (valor == null || typeof valor !== 'object' || Array.isArray(valor)) return '';
+  const numero = (valor as Record<string, unknown>).numero;
+  return numero != null && typeof numero !== 'object' ? String(numero).trim() : '';
+}
+
 // Campo "solicitacaoFornecimento" de uma interação contábil — pedido do
 // usuário (2026-10-14): só interessa o número/ano formatado (`numeroAno`,
 // ex.: "4641/2025"), não o objeto inteiro que o Betha devolve. Mesma lógica
@@ -429,26 +439,38 @@ function valorNumeroDespesa(valor: unknown): string {
     .join(', ');
 }
 
-// Número do empenho (ex.: 5426) gerado quando a interação é contabilizada:
-// `empenhoContabilidadeBO.numeroEmpenho` de cada rateio do `desdobramento`
-// (ou `numeroEmpenho` direto no rateio, no "Empenhar"). Interação não
+// Número/ano do empenho (ex.: 5426/2026) gerado quando a interação é
+// contabilizada: `empenhoContabilidadeBO.numeroEmpenho` de cada rateio do
+// `desdobramento` (ou `numeroEmpenho` direto no rateio, no "Empenhar"). O
+// ano vem em `empenhoContabilidadeBO.anoEmpenho` (confirmado no retorno real,
+// em empenhar e liquidar); sem ele, mostra só o número. Interação não
 // contabilizada fica em branco. Mesma lógica do lado da extensão
 // (browser-extension/src/shared/campos-relatorio.js).
+function anoDoEmpenho(...origens: unknown[]): string | null {
+  for (const origem of origens) {
+    const v = origem != null && typeof origem === 'object' ? (origem as Record<string, unknown>).anoEmpenho : null;
+    if (typeof v === 'number' || (typeof v === 'string' && /^\d{4}$/.test(v.trim()))) return String(v).trim();
+  }
+  return null;
+}
+
 function valorNumeroEmpenho(raw: Record<string, unknown>): string {
   const situacao = raw.situacao ?? raw.situacaoDesc;
   if (typeof situacao !== 'string' || !/^contabilizad/i.test(situacao.trim())) return '';
   const lista = Array.isArray(raw.desdobramento) ? raw.desdobramento : [];
-  const numeros = lista
+  const empenhos = lista
     .map((item) => {
       if (item == null || typeof item !== 'object') return null;
       const rateio = item as Record<string, unknown>;
       const bo = rateio.empenhoContabilidadeBO;
-      return bo != null && typeof bo === 'object' && (bo as Record<string, unknown>).numeroEmpenho != null
-        ? (bo as Record<string, unknown>).numeroEmpenho
-        : rateio.numeroEmpenho;
+      const boObj = bo != null && typeof bo === 'object' ? (bo as Record<string, unknown>) : null;
+      const numero = boObj?.numeroEmpenho != null ? boObj.numeroEmpenho : rateio.numeroEmpenho;
+      if (numero == null) return null;
+      const ano = anoDoEmpenho(boObj, rateio);
+      return ano ? `${String(numero)}/${ano}` : String(numero);
     })
-    .filter((v) => v != null);
-  return [...new Set(numeros)].join(', ');
+    .filter((v): v is string => v != null);
+  return [...new Set(empenhos)].join(', ');
 }
 
 // Veículo de publicação (chave contém "veiculo"): o nome exibido é
@@ -706,9 +728,14 @@ export function preencherPlanilhaCamposDinamicos(
     const contexto = { entidades: indexarEntidades(raw) };
     formatar = (chave, valor) => valorCelulaDinamica(chave, valor, contexto);
   }
+  const aplicarFormato = formatar;
   preencherPlanilhaCampos(
     planilha,
-    Object.entries(raw).map(([chave, valor]) => ({ campo: formatarChave(chave), valor: formatar(chave, valor) })),
+    Object.entries(raw).flatMap(([chave, valor]) => {
+      const linha = { campo: formatarChave(chave), valor: aplicarFormato(chave, valor) };
+      const codigo = ehChaveOrganograma(chave) ? codigoOrganograma(valor) : '';
+      return codigo ? [linha, { campo: 'Código do organograma', valor: codigo }] : [linha];
+    }),
   );
 }
 
@@ -853,7 +880,7 @@ function workbookInteracaoContabilidade(
         ? [
             linha,
             { campo: 'Despesa', valor: valorNumeroDespesa(valor) },
-            { campo: 'Número do empenho', valor: valorNumeroEmpenho(raw) },
+            { campo: 'Número/ano do empenho', valor: valorNumeroEmpenho(raw) },
           ]
         : [linha];
     }),
