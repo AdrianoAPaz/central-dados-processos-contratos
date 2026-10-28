@@ -39,7 +39,7 @@ export function base64ParaBytes(base64) {
 // `prefixo + pasta/`. Cada um gera/falha independente dos demais e vira uma
 // linha em `lista` (<ul>); `rotulo` identifica de quem é a linha quando o zip
 // junta vários documentos (processo + contratações).
-//   documentos: [{ nome, gerar() }]   anexos: [{ id, origem, ...metadados }]
+//   documentos: [{ nome, gerar() }]   anexos: [{ id, origem, pastaZip?, ...metadados }]
 //   sistema: 'compras' pros anexos do Compras (omitido = Betha Contratos).
 export async function coletarArquivosPacote({ documentos, anexos, prefixo = '', pasta, sistema, lista, rotulo = '' }) {
   const usados = new Set()
@@ -69,7 +69,10 @@ export async function coletarArquivosPacote({ documentos, anexos, prefixo = '', 
         li.textContent = `⚠️ ${rotulo}${anexo.origem} — ${nomeAnexo(anexo)} (falha: ${(resp && resp.erro) || 'sem retorno'})`
         continue
       }
-      arquivos.push({ nome: `${prefixo}${pasta}/${nomeUnicoNoZip(nomeAnexo(anexo), usados)}`, bytes: base64ParaBytes(resp.base64) })
+      // `anexo.pastaZip` (quando houver) sobrepõe a pasta padrão — ex.: anexos das
+      // alterações contratuais numa pasta à parte.
+      const pastaDoAnexo = anexo.pastaZip || pasta
+      arquivos.push({ nome: `${prefixo}${pastaDoAnexo}/${nomeUnicoNoZip(nomeAnexo(anexo), usados)}`, bytes: base64ParaBytes(resp.base64) })
       li.textContent = `✅ ${rotulo}${anexo.origem} — ${nomeAnexo(anexo)}`
     } catch (e) {
       li.textContent = `⚠️ ${rotulo}${anexo.origem} — ${nomeAnexo(anexo)} (erro: ${String((e && e.message) || e)})`

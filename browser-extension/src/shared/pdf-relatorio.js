@@ -9,6 +9,7 @@ import {
   montarCamposRelatorio,
   montarSecoesAditivos,
   montarSecoesApostilamentos,
+  montarSecoesRescisoes,
   montarTabelaItens,
   montarTabelaResponsaveis,
   montarSecoesSolicitacoesFornecimento,
@@ -290,6 +291,11 @@ export function listarDocumentosRelatorio(contrato) {
   }
 
   for (const secao of montarSecoesApostilamentos(contrato.apostilamentos)) {
+    documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfApostilamento(secao) })
+  }
+
+  // Rescisão contratual: alteração contratual como o apostilamento, mesmo PDF.
+  for (const secao of montarSecoesRescisoes(contrato.rescisoes)) {
     documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfApostilamento(secao) })
   }
 

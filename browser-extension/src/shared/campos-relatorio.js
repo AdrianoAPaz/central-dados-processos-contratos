@@ -43,6 +43,7 @@ export function montarCamposRelatorio(c) {
     { label: 'Quantidade de itens', valor: Array.isArray(c.itens) ? c.itens.length : 0 },
     { label: 'Quantidade de aditivos', valor: Array.isArray(c.aditivos) ? c.aditivos.length : 0 },
     { label: 'Quantidade de apostilamentos', valor: Array.isArray(c.apostilamentos) ? c.apostilamentos.length : 0 },
+    { label: 'Quantidade de rescisões', valor: Array.isArray(c.rescisoes) ? c.rescisoes.length : 0 },
   ]
 }
 
@@ -138,6 +139,13 @@ export function montarSecoesAditivos(aditivos) {
 // estrutura e ordenação do aditivo; título "apostilamento 1".
 export function montarSecoesApostilamentos(apostilamentos) {
   return montarSecoesAlteracao(apostilamentos, 'apostilamento')
+}
+
+// Rescisões contratuais — também alteração contratual (pedido do usuário,
+// 2026-10-27). Mesma estrutura e ordenação do apostilamento; título
+// "rescisão 1".
+export function montarSecoesRescisoes(rescisoes) {
+  return montarSecoesAlteracao(rescisoes, 'rescisão')
 }
 
 function montarSecoesAlteracao(registros, rotulo) {
