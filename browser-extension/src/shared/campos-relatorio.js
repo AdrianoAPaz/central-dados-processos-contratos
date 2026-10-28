@@ -43,6 +43,7 @@ export function montarCamposRelatorio(c) {
     { label: 'Quantidade de itens', valor: Array.isArray(c.itens) ? c.itens.length : 0 },
     { label: 'Quantidade de aditivos', valor: Array.isArray(c.aditivos) ? c.aditivos.length : 0 },
     { label: 'Quantidade de apostilamentos', valor: Array.isArray(c.apostilamentos) ? c.apostilamentos.length : 0 },
+    { label: 'Quantidade de rescisões', valor: Array.isArray(c.rescisoes) ? c.rescisoes.length : 0 },
   ]
 }
 
@@ -140,6 +141,13 @@ export function montarSecoesApostilamentos(apostilamentos) {
   return montarSecoesAlteracao(apostilamentos, 'apostilamento')
 }
 
+// Rescisões contratuais — também alteração contratual (pedido do usuário,
+// 2026-10-27). Mesma estrutura e ordenação do apostilamento; título
+// "rescisão 1".
+export function montarSecoesRescisoes(rescisoes) {
+  return montarSecoesAlteracao(rescisoes, 'rescisão')
+}
+
 function montarSecoesAlteracao(registros, rotulo) {
   if (!Array.isArray(registros) || !registros.length) return []
 
@@ -228,7 +236,7 @@ export function montarSecoesInteracoesContabilidade(interacoes) {
       // `desdobramento` (ver enriquecerNumerosDespesa).
       if (chave === 'desdobramento') {
         campos.push({ label: 'Despesa', valor: valorNumeroDespesa(valor) })
-        campos.push({ label: 'Número do empenho', valor: valorNumeroEmpenho(raw) })
+        campos.push({ label: 'Número/ano do empenho', valor: valorNumeroEmpenho(raw) })
       }
     }
     return { titulo, campos }
@@ -374,7 +382,11 @@ export function conteudoTexto(valor) {
 // mais chaves do que as exibidas — ex.: os itens que viram tabela própria).
 function camposDinamicos(campos, raw) {
   const contexto = { entidades: indexarEntidades(raw) }
-  return Object.entries(campos || {}).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor, contexto) }))
+  return Object.entries(campos || {}).flatMap(([chave, valor]) => {
+    const campo = { label: formatarChave(chave), valor: valorCampoDinamico(chave, valor, contexto) }
+    const codigo = ehChaveOrganograma(chave) ? codigoOrganograma(valor) : ''
+    return codigo ? [campo, { label: 'Código do organograma', valor: codigo }] : [campo]
+  })
 }
 
 // Responsáveis do contrato (fiscal, gestor etc.) em seção própria — pedido
@@ -468,6 +480,15 @@ function ehChaveOrganograma(chave) {
   return typeof chave === 'string' && /organograma/i.test(chave)
 }
 
+// Código do organograma como campo próprio ("Código do organograma"), logo
+// abaixo do "Organograma" — pedido do usuário: a solicitação de fornecimento
+// mostrava só a descrição. Confirmado no retorno real do Betha (2026-10-28): o
+// objeto traz `numero` (ex.: "0200300203", sem máscara) além de `descricao`.
+function codigoOrganograma(valor) {
+  if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return ''
+  return valor.numero != null && typeof valor.numero !== 'object' ? String(valor.numero).trim() : ''
+}
+
 // Campo "desdobramento" de uma interação contábil (empenhar/liquidar/pagar) —
 // pedido do usuário (2026-09-22): o Betha devolve, pra cada rateio
 // orçamentário, um OBJETO cheio de metadados (empenho, natureza de despesa,
@@ -501,32 +522,42 @@ function valorNumeroDespesa(valor) {
     .join(', ')
 }
 
-// Número do empenho (ex.: 5426) gerado quando a interação é contabilizada —
-// pedido do usuário (2026-10-21). Confirmado no retorno real do Betha: cada
-// rateio do `desdobramento` traz `empenhoContabilidadeBO.numeroEmpenho`
-// (presente em empenhar/liquidar/pagar) e, só no "Empenhar", também
-// `numeroEmpenho` direto no rateio. Interação não contabilizada fica em branco.
-// Exibido como número/ano (ex.: 417/2025), com o ano vindo de
-// `empenhoContabilidadeBO.anoEmpenho` — pedido do usuário (2026-10-23).
+// Número/ano do empenho (ex.: 5426/2026) gerado quando a interação é
+// contabilizada — pedido do usuário (2026-10-21), ano incluído a pedido de
+// 2026-10-27. Confirmado no retorno real do Betha: cada rateio do
+// `desdobramento` traz `empenhoContabilidadeBO.numeroEmpenho` (presente em
+// empenhar/liquidar/pagar) e, só no "Empenhar", também `numeroEmpenho` direto
+// no rateio. O ano vem em `empenhoContabilidadeBO.anoEmpenho` (confirmado no
+// retorno real, em empenhar e liquidar); sem ele, mostra só o número.
+// Interação não contabilizada fica em branco.
 function interacaoContabilizada(raw) {
   const situacao = raw && (raw.situacao || raw.situacaoDesc)
   return typeof situacao === 'string' && /^contabilizad/i.test(situacao.trim())
 }
 
+function anoDoEmpenho(...origens) {
+  for (const origem of origens) {
+    const v = origem && typeof origem === 'object' ? origem.anoEmpenho : null
+    if (typeof v === 'number' || (typeof v === 'string' && /^\d{4}$/.test(v.trim()))) return String(v).trim()
+  }
+  return null
+}
+
 function valorNumeroEmpenho(raw) {
   if (!interacaoContabilizada(raw)) return ''
   const lista = Array.isArray(raw.desdobramento) ? raw.desdobramento : []
-  const numeros = lista
+  const empenhos = lista
     .map((item) => {
       if (!item || typeof item !== 'object') return null
       const bo = item.empenhoContabilidadeBO
-      const boValido = bo && typeof bo === 'object'
-      const numero = boValido && bo.numeroEmpenho != null ? bo.numeroEmpenho : item.numeroEmpenho
+      const origemNumero = bo && typeof bo === 'object' && bo.numeroEmpenho != null ? bo : item
+      const numero = origemNumero.numeroEmpenho
       if (numero == null) return null
-      return boValido && bo.anoEmpenho != null ? `${numero}/${bo.anoEmpenho}` : String(numero)
+      const ano = anoDoEmpenho(bo, item)
+      return ano ? `${numero}/${ano}` : String(numero)
     })
     .filter((v) => v != null)
-  return [...new Set(numeros)].join(', ')
+  return [...new Set(empenhos)].join(', ')
 }
 
 // Campo "solicitacaoFornecimento" de uma interação contábil — pedido do

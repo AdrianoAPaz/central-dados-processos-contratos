@@ -303,32 +303,55 @@ function ordenarItensPorNumero(itens) {
 // o registro é desembrulhado: o objeto interno (que é o que o relatório
 // mostra) ganha `valor`/`operacao` do invólucro quando não os tem — o
 // apostilamento só traz o valor no invólucro (ex.: reajuste de R$ 9.424,80).
+function semAcento(texto) {
+  return String(texto || '')
+    .normalize('NFD')
+    .replace(/\p{Mn}/gu, '')
+}
+
+// `tipoAlteracao` normalizado (sem acento, maiúsculo): ADITIVO, APOSTILAMENTO
+// ou RESCISAO. A rescisão contratual é uma alteração como as outras (pedido do
+// usuário, 2026-10-27) — o valor exato que o Betha devolve pra ela não foi
+// confirmado ao vivo, por isso a comparação é por "RESCIS".
+function tipoDaAlteracao(alteracao) {
+  return semAcento(alteracao && alteracao.tipoAlteracao).toUpperCase()
+}
+
 function achatarAlteracao(alteracao) {
-  const interno = alteracao[String(alteracao.tipoAlteracao || '').toLowerCase()]
+  const chaveInterna = Object.keys(alteracao).find(
+    (chave) => semAcento(chave).toLowerCase() === tipoDaAlteracao(alteracao).toLowerCase(),
+  )
+  const interno = chaveInterna && alteracao[chaveInterna]
   const base = interno && typeof interno === 'object' ? interno : alteracao
   const resumo = {}
   if (alteracao.operacao) resumo.operacao = alteracao.operacao
   if (alteracao.valor != null && base.valorAditivo == null) resumo.valor = alteracao.valor
+  // Anexos podem vir no invólucro em vez de no objeto interno.
+  if (base !== alteracao && !Array.isArray(base.arquivos) && Array.isArray(alteracao.arquivos)) {
+    resumo.arquivos = alteracao.arquivos
+  }
   return { ...base, ...resumo }
 }
 
-// Separa a listagem de alterações em apostilamentos e em aditivos que a
-// listagem `aditivos` não trouxe (as duas fontes se complementam: nenhuma
-// alteração contratual pode ficar de fora do relatório).
+// Separa a listagem de alterações em apostilamentos, rescisões e em aditivos
+// que a listagem `aditivos` não trouxe (as duas fontes se complementam:
+// nenhuma alteração contratual pode ficar de fora do relatório).
 function separarAlteracoes(alteracoes, aditivosConhecidos) {
   const idsConhecidos = new Set(aditivosConhecidos.map((a) => String(a && a.id)))
   const apostilamentos = []
+  const rescisoes = []
   const aditivosExtras = []
   for (const alteracao of alteracoes) {
     if (!alteracao || typeof alteracao !== 'object') continue
-    const tipo = String(alteracao.tipoAlteracao || '').toUpperCase()
+    const tipo = tipoDaAlteracao(alteracao)
     if (tipo === 'APOSTILAMENTO') apostilamentos.push(achatarAlteracao(alteracao))
+    else if (tipo.startsWith('RESCIS')) rescisoes.push(achatarAlteracao(alteracao))
     else if (tipo === 'ADITIVO') {
       const aditivo = achatarAlteracao(alteracao)
       if (!idsConhecidos.has(String(aditivo.id ?? alteracao.idAlteracao))) aditivosExtras.push(aditivo)
     }
   }
-  return { apostilamentos, aditivosExtras }
+  return { apostilamentos, rescisoes, aditivosExtras }
 }
 
 // O campo `aditivo` da solicitação de fornecimento vem só com `{ arquivos: [],
@@ -400,6 +423,7 @@ async function comDetalhes(contrato) {
   const aditivosDaListagem = respAditivos.aditivos || []
   const separadas = separarAlteracoes(alteracoes, aditivosDaListagem)
   const apostilamentos = await enriquecerDescricoesCadastros(separadas.apostilamentos)
+  const rescisoes = await enriquecerDescricoesCadastros(separadas.rescisoes)
 
   const aditivos = await enriquecerDescricoesCadastros([...aditivosDaListagem, ...separadas.aditivosExtras])
   const aditivosComItens = await Promise.all(
@@ -473,6 +497,7 @@ async function comDetalhes(contrato) {
     itens: respItens.itens || [],
     aditivos: aditivosComItens,
     apostilamentos,
+    rescisoes,
     solicitacoesFornecimento: solicitacoesComRecebimentos,
     anexosTextos: respAnexosTextos.anexos || [],
     // Registros da rotina "Textos" — documento "textos contrato X".

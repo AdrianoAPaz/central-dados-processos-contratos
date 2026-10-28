@@ -2,6 +2,7 @@ import {
   montarCamposRelatorio,
   montarSecoesAditivos,
   montarSecoesApostilamentos,
+  montarSecoesRescisoes,
   montarTabelaItens,
   montarTabelaResponsaveis,
   montarSecoesSolicitacoesFornecimento,
@@ -125,14 +126,20 @@ async function carregar() {
 
   // Apostilamentos — mesma estrutura dos aditivos; os itens só aparecem se o
   // registro trouxer algum (apostilamento sem itens é o caso comum).
-  const secoesApostilamentos = montarSecoesApostilamentos(contrato.apostilamentos)
-  if (secoesApostilamentos.length) {
-    const container = document.getElementById('apostilamentos')
+  // Rescisões contratuais seguem o mesmo formato (também são alterações
+  // contratuais).
+  const alteracoesSemItens = [
+    { id: 'apostilamentos', rotulo: 'Apostilamentos', secoes: montarSecoesApostilamentos(contrato.apostilamentos) },
+    { id: 'rescisoes', rotulo: 'Rescisões', secoes: montarSecoesRescisoes(contrato.rescisoes) },
+  ]
+  for (const { id, rotulo, secoes } of alteracoesSemItens) {
+    if (!secoes.length) continue
+    const container = document.getElementById(id)
     const titulo = document.createElement('h2')
-    titulo.textContent = `Apostilamentos (${secoesApostilamentos.length})`
+    titulo.textContent = `${rotulo} (${secoes.length})`
     container.appendChild(titulo)
 
-    for (const secao of secoesApostilamentos) {
+    for (const secao of secoes) {
       const bloco = document.createElement('div')
       bloco.className = 'aditivo-secao'
 
@@ -141,8 +148,8 @@ async function carregar() {
       bloco.appendChild(h3)
       bloco.appendChild(criarTabelaCampos(secao.campos))
 
-      const tabelaItensApostilamento = criarTabelaDinamica(secao.tabelaItens)
-      if (tabelaItensApostilamento) bloco.appendChild(tabelaItensApostilamento)
+      const tabelaItens = criarTabelaDinamica(secao.tabelaItens)
+      if (tabelaItens) bloco.appendChild(tabelaItens)
 
       container.appendChild(bloco)
     }
