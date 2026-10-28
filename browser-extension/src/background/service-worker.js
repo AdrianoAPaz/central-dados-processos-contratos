@@ -192,7 +192,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // devolve `despesa.numero` (ver buscarNumeroDespesa abaixo).
   if (message.type === 'buscar-numero-despesa') {
     buscarNumeroDespesa(message.despesaId, message.data)
-      .then((numero) => sendResponse({ numero }))
+      .then(({ numero, acao }) => sendResponse({ numero, acao }))
       .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
     return true
   }
@@ -722,7 +722,24 @@ async function buscarNumeroDespesa(despesaId, data) {
   })
   if (!resp.ok) throw new Error(`API do Betha respondeu ${resp.status} ao buscar a despesa ${despesaId}`)
   const dados = await resp.json()
-  return dados && dados.despesa && dados.despesa.numero != null ? dados.despesa.numero : null
+  const despesa = dados && dados.despesa
+  return {
+    numero: despesa && despesa.numero != null ? despesa.numero : null,
+    acao: numeroAcaoDespesa(despesa),
+  }
+}
+
+// Número da ação da despesa (pedido do usuário, 2026-10-28), lido do mesmo
+// objeto `despesa` do saldo-despesa-na-data. O formato exato do campo ainda
+// não foi confirmado no retorno real: aceita `acao` como objeto (numero/
+// codigo) ou valor simples. Sem o campo, fica nulo e o relatório mostra em
+// branco.
+function numeroAcaoDespesa(despesa) {
+  const acao = despesa && despesa.acao
+  if (acao == null) return null
+  if (typeof acao !== 'object') return acao
+  const valor = acao.numero != null ? acao.numero : acao.codigo
+  return valor != null && typeof valor !== 'object' ? valor : null
 }
 
 // Recebimentos de UMA solicitação de fornecimento. Endpoint confirmado ao
