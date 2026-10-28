@@ -392,6 +392,16 @@ function ehChaveOrganograma(chave: string): boolean {
   return /organograma/i.test(chave);
 }
 
+// Código do organograma como linha própria ("Código do organograma"), logo
+// abaixo do "Organograma" — o objeto do Betha traz `numero` (ex.:
+// "0200300203"). Mesma lógica do lado da extensão (codigoOrganograma em
+// campos-relatorio.js).
+function codigoOrganograma(valor: unknown): string {
+  if (valor == null || typeof valor !== 'object' || Array.isArray(valor)) return '';
+  const numero = (valor as Record<string, unknown>).numero;
+  return numero != null && typeof numero !== 'object' ? String(numero).trim() : '';
+}
+
 // Campo "solicitacaoFornecimento" de uma interação contábil — pedido do
 // usuário (2026-10-14): só interessa o número/ano formatado (`numeroAno`,
 // ex.: "4641/2025"), não o objeto inteiro que o Betha devolve. Mesma lógica
@@ -706,9 +716,14 @@ export function preencherPlanilhaCamposDinamicos(
     const contexto = { entidades: indexarEntidades(raw) };
     formatar = (chave, valor) => valorCelulaDinamica(chave, valor, contexto);
   }
+  const aplicarFormato = formatar;
   preencherPlanilhaCampos(
     planilha,
-    Object.entries(raw).map(([chave, valor]) => ({ campo: formatarChave(chave), valor: formatar(chave, valor) })),
+    Object.entries(raw).flatMap(([chave, valor]) => {
+      const linha = { campo: formatarChave(chave), valor: aplicarFormato(chave, valor) };
+      const codigo = ehChaveOrganograma(chave) ? codigoOrganograma(valor) : '';
+      return codigo ? [linha, { campo: 'Código do organograma', valor: codigo }] : [linha];
+    }),
   );
 }
 

@@ -361,7 +361,11 @@ export function conteudoTexto(valor) {
 // mais chaves do que as exibidas — ex.: os itens que viram tabela própria).
 function camposDinamicos(campos, raw) {
   const contexto = { entidades: indexarEntidades(raw) }
-  return Object.entries(campos || {}).map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor, contexto) }))
+  return Object.entries(campos || {}).flatMap(([chave, valor]) => {
+    const campo = { label: formatarChave(chave), valor: valorCampoDinamico(chave, valor, contexto) }
+    const codigo = ehChaveOrganograma(chave) ? codigoOrganograma(valor) : ''
+    return codigo ? [campo, { label: 'Código do organograma', valor: codigo }] : [campo]
+  })
 }
 
 // Responsáveis do contrato (fiscal, gestor etc.) em seção própria — pedido
@@ -453,6 +457,15 @@ export function valorTexto(v) {
 // tiver um `codigo` solto, só pra esse campo específico.
 function ehChaveOrganograma(chave) {
   return typeof chave === 'string' && /organograma/i.test(chave)
+}
+
+// Código do organograma como campo próprio ("Código do organograma"), logo
+// abaixo do "Organograma" — pedido do usuário: a solicitação de fornecimento
+// mostrava só a descrição. Confirmado no retorno real do Betha (2026-10-28): o
+// objeto traz `numero` (ex.: "0200300203", sem máscara) além de `descricao`.
+function codigoOrganograma(valor) {
+  if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return ''
+  return valor.numero != null && typeof valor.numero !== 'object' ? String(valor.numero).trim() : ''
 }
 
 // Campo "desdobramento" de uma interação contábil (empenhar/liquidar/pagar) —
