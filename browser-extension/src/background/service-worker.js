@@ -192,7 +192,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // devolve `despesa.numero` (ver buscarNumeroDespesa abaixo).
   if (message.type === 'buscar-numero-despesa') {
     buscarNumeroDespesa(message.despesaId, message.data)
-      .then((numero) => sendResponse({ numero }))
+      .then(({ numero, recurso }) => sendResponse({ numero, recurso }))
       .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
     return true
   }
@@ -742,7 +742,23 @@ async function buscarNumeroDespesa(despesaId, data) {
   })
   if (!resp.ok) throw new Error(`API do Betha respondeu ${resp.status} ao buscar a despesa ${despesaId}`)
   const dados = await resp.json()
-  return dados && dados.despesa && dados.despesa.numero != null ? dados.despesa.numero : null
+  const despesa = dados && dados.despesa
+  return {
+    numero: despesa && despesa.numero != null ? despesa.numero : null,
+    recurso: recursoDespesa(dados),
+  }
+}
+
+// Recurso da despesa (pedido do usuário, 2026-10-28), no mesmo retorno do
+// saldo-despesa-na-data — fica na raiz, ao lado de `despesa`, e não dentro
+// dela. Confirmado no retorno real: `recurso: { numero: "150010010500",
+// numeroFormatado: "1.500.1001.0500", descricao: "MDE" }`. Usa o número
+// formatado; sem ele, cai no número cru.
+function recursoDespesa(dados) {
+  const recurso = dados && dados.recurso
+  if (!recurso || typeof recurso !== 'object') return null
+  const valor = recurso.numeroFormatado != null ? recurso.numeroFormatado : recurso.numero
+  return valor != null && typeof valor !== 'object' ? valor : null
 }
 
 // Recebimentos de UMA solicitação de fornecimento. Endpoint confirmado ao

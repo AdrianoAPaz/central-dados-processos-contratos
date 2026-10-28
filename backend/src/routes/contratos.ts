@@ -439,6 +439,19 @@ function valorNumeroDespesa(valor: unknown): string {
     .join(', ');
 }
 
+// Recurso da despesa (ex.: "1.500.1001.0500") — `despesa.recurso`, injetado
+// pela extensão junto com `despesa.numero`; em branco quando não veio.
+function valorRecursoDespesa(valor: unknown): string {
+  const lista = Array.isArray(valor) ? valor : [valor];
+  return lista
+    .map((item) => {
+      const despesa = item != null && typeof item === 'object' ? (item as Record<string, unknown>).despesa : null;
+      return despesa != null && typeof despesa === 'object' ? (despesa as Record<string, unknown>).recurso : null;
+    })
+    .filter((v) => v != null)
+    .join(', ');
+}
+
 // Número/ano do empenho (ex.: 5426/2026) gerado quando a interação é
 // contabilizada: `empenhoContabilidadeBO.numeroEmpenho` de cada rateio do
 // `desdobramento` (ou `numeroEmpenho` direto no rateio, no "Empenhar"). O
@@ -881,6 +894,7 @@ function workbookInteracaoContabilidade(
         ? [
             linha,
             { campo: 'Despesa', valor: valorNumeroDespesa(valor) },
+            { campo: 'Recurso', valor: valorRecursoDespesa(valor) },
             { campo: 'Número/ano do empenho', valor: valorNumeroEmpenho(raw) },
           ]
         : [linha];

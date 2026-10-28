@@ -236,6 +236,7 @@ export function montarSecoesInteracoesContabilidade(interacoes) {
       // `desdobramento` (ver enriquecerNumerosDespesa).
       if (chave === 'desdobramento') {
         campos.push({ label: 'Despesa', valor: valorNumeroDespesa(valor) })
+        campos.push({ label: 'Recurso', valor: valorRecursoDespesa(valor) })
         campos.push({ label: 'Número/ano do empenho', valor: valorNumeroEmpenho(raw) })
       }
     }
@@ -518,6 +519,16 @@ function valorNumeroDespesa(valor) {
   const lista = Array.isArray(valor) ? valor : [valor]
   return lista
     .map((item) => (item && typeof item === 'object' && item.despesa ? item.despesa.numero : null))
+    .filter((v) => v != null)
+    .join(', ')
+}
+
+// Recurso da despesa (ex.: "1.500.1001.0500") — `despesa.recurso`, injetado
+// por popup.js junto com o número da despesa; em branco quando não veio.
+function valorRecursoDespesa(valor) {
+  const lista = Array.isArray(valor) ? valor : [valor]
+  return lista
+    .map((item) => (item && typeof item === 'object' && item.despesa ? item.despesa.recurso : null))
     .filter((v) => v != null)
     .join(', ')
 }
