@@ -439,14 +439,14 @@ function valorNumeroDespesa(valor: unknown): string {
     .join(', ');
 }
 
-// Número da ação da despesa — `despesa.numeroAcao`, injetado pela extensão
-// junto com `despesa.numero`; em branco quando não veio.
-function valorNumeroAcaoDespesa(valor: unknown): string {
+// Recurso da despesa (ex.: "1.500.1001.0500") — `despesa.recurso`, injetado
+// pela extensão junto com `despesa.numero`; em branco quando não veio.
+function valorRecursoDespesa(valor: unknown): string {
   const lista = Array.isArray(valor) ? valor : [valor];
   return lista
     .map((item) => {
       const despesa = item != null && typeof item === 'object' ? (item as Record<string, unknown>).despesa : null;
-      return despesa != null && typeof despesa === 'object' ? (despesa as Record<string, unknown>).numeroAcao : null;
+      return despesa != null && typeof despesa === 'object' ? (despesa as Record<string, unknown>).recurso : null;
     })
     .filter((v) => v != null)
     .join(', ');
@@ -893,7 +893,7 @@ function workbookInteracaoContabilidade(
         ? [
             linha,
             { campo: 'Despesa', valor: valorNumeroDespesa(valor) },
-            { campo: 'Ação da despesa', valor: valorNumeroAcaoDespesa(valor) },
+            { campo: 'Recurso', valor: valorRecursoDespesa(valor) },
             { campo: 'Número/ano do empenho', valor: valorNumeroEmpenho(raw) },
           ]
         : [linha];

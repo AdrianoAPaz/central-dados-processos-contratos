@@ -192,7 +192,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // devolve `despesa.numero` (ver buscarNumeroDespesa abaixo).
   if (message.type === 'buscar-numero-despesa') {
     buscarNumeroDespesa(message.despesaId, message.data)
-      .then(({ numero, acao }) => sendResponse({ numero, acao }))
+      .then(({ numero, recurso }) => sendResponse({ numero, recurso }))
       .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
     return true
   }
@@ -725,20 +725,19 @@ async function buscarNumeroDespesa(despesaId, data) {
   const despesa = dados && dados.despesa
   return {
     numero: despesa && despesa.numero != null ? despesa.numero : null,
-    acao: numeroAcaoDespesa(despesa),
+    recurso: recursoDespesa(dados),
   }
 }
 
-// Número da ação da despesa (pedido do usuário, 2026-10-28), lido do mesmo
-// objeto `despesa` do saldo-despesa-na-data. O formato exato do campo ainda
-// não foi confirmado no retorno real: aceita `acao` como objeto (numero/
-// codigo) ou valor simples. Sem o campo, fica nulo e o relatório mostra em
-// branco.
-function numeroAcaoDespesa(despesa) {
-  const acao = despesa && despesa.acao
-  if (acao == null) return null
-  if (typeof acao !== 'object') return acao
-  const valor = acao.numero != null ? acao.numero : acao.codigo
+// Recurso da despesa (pedido do usuário, 2026-10-28), no mesmo retorno do
+// saldo-despesa-na-data — fica na raiz, ao lado de `despesa`, e não dentro
+// dela. Confirmado no retorno real: `recurso: { numero: "150010010500",
+// numeroFormatado: "1.500.1001.0500", descricao: "MDE" }`. Usa o número
+// formatado; sem ele, cai no número cru.
+function recursoDespesa(dados) {
+  const recurso = dados && dados.recurso
+  if (!recurso || typeof recurso !== 'object') return null
+  const valor = recurso.numeroFormatado != null ? recurso.numeroFormatado : recurso.numero
   return valor != null && typeof valor !== 'object' ? valor : null
 }
 

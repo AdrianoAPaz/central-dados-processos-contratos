@@ -127,14 +127,14 @@ async function enriquecerNumerosDespesa(interacoes) {
       const chaveCache = `${despesaId}|${data}`
       if (!cache.has(chaveCache)) {
         const resp = await chrome.runtime.sendMessage({ type: 'buscar-numero-despesa', despesaId, data })
-        cache.set(chaveCache, resp && !resp.erro ? { numero: resp.numero, acao: resp.acao } : null)
+        cache.set(chaveCache, resp && !resp.erro ? { numero: resp.numero, recurso: resp.recurso } : null)
       }
       const dadosDespesa = cache.get(chaveCache)
       const numero = dadosDespesa && dadosDespesa.numero
-      const acao = dadosDespesa && dadosDespesa.acao
+      const recurso = dadosDespesa && dadosDespesa.recurso
       const extras = {}
       if (numero != null) extras.numero = numero
-      if (acao != null) extras.numeroAcao = acao
+      if (recurso != null) extras.recurso = recurso
       desdobramentosEnriquecidos.push(Object.keys(extras).length ? { ...item, despesa: { ...item.despesa, ...extras } } : item)
     }
     resultado.push({ ...interacao, desdobramento: desdobramentosEnriquecidos })
