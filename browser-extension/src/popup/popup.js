@@ -148,6 +148,8 @@ async function enriquecerNumerosDespesa(interacoes) {
 const RESOLVEDORES_DESCRICAO = [
   { chave: /^loca(l|is)entrega/i, mensagem: 'buscar-locais-entrega', lista: 'locais' },
   { chave: /^tipoobjeto/i, mensagem: 'buscar-tipos-objeto', lista: 'tipos' },
+  { chave: /^formas?pagamento/i, mensagem: 'buscar-formas-pagamento', lista: 'formas' },
+  { chave: /^prazos?(de)?entrega/i, mensagem: 'buscar-prazos-entrega', lista: 'prazos' },
 ]
 
 // Valor do campo pode ser o objeto do cadastro ({ id, ... }) ou só o id.
@@ -216,8 +218,8 @@ async function enriquecerResponsaveis(registros) {
   return resultado
 }
 
-// `contratacao` de cada interação contábil só traz o id interno da
-// contratação — o relatório mostra o sequencial dela (o mesmo do documento do
+// `contratacao` de cada interação contábil (e de cada texto do contrato) só
+// traz o id interno da contratação — o relatório mostra o sequencial dela (o mesmo do documento do
 // contrato; pedido do usuário, 2026-10-14). Quando o id é o do próprio
 // contrato (o caso normal, já que as interações vêm de
 // contratacoes/{id}/interacaocontabil) usa o sequencial que já temos; só vai
@@ -352,6 +354,33 @@ function separarAlteracoes(alteracoes, aditivosConhecidos) {
   return { apostilamentos, rescisoes, aditivosExtras }
 }
 
+// O campo `aditivo` da solicitação de fornecimento vem só com `{ arquivos: [],
+// id }` (pedido do usuário, 2026-10-23) — os dados do aditivo (sequencial,
+// tipo, valor…) estão na listagem de alterações do contrato
+// (contratacoes/{id}/alteracoes, `idAlteracao` = id do aditivo). Resolve pelo
+// id usando os aditivos que já temos (listagem de aditivos + alterações; as
+// alterações, formato confirmado ao vivo, têm prioridade). Best-effort: id que
+// não aparece em nenhuma das duas fica como veio.
+function enriquecerAditivosSolicitacoes(solicitacoes, aditivosDaListagem, alteracoes) {
+  const porId = new Map()
+  for (const aditivo of aditivosDaListagem) {
+    if (aditivo && aditivo.id != null) porId.set(String(aditivo.id), aditivo)
+  }
+  for (const alteracao of alteracoes) {
+    if (!alteracao || String(alteracao.tipoAlteracao || '').toUpperCase() !== 'ADITIVO') continue
+    const aditivo = achatarAlteracao(alteracao)
+    const id = aditivo.id ?? alteracao.idAlteracao
+    if (id != null) porId.set(String(id), aditivo)
+  }
+
+  return solicitacoes.map((sf) => {
+    const valor = sf && sf.aditivo
+    const completo = porId.get(idDoValor(valor))
+    if (!completo) return sf
+    return { ...sf, aditivo: typeof valor === 'object' ? { ...valor, ...completo } : completo }
+  })
+}
+
 async function comDetalhes(contrato) {
   if (contrato.id == null) return contrato
 
@@ -416,7 +445,11 @@ async function comDetalhes(contrato) {
   // buscado por cima de cada recebimento. Endpoints confirmados (ver
   // service-worker.js): erro em qualquer um interrompe o relatório, mesmo
   // critério das solicitações de fornecimento em si.
-  const solicitacoes = await enriquecerResponsaveis(await enriquecerDescricoesCadastros(respSf.solicitacoes || []))
+  const solicitacoes = enriquecerAditivosSolicitacoes(
+    await enriquecerResponsaveis(await enriquecerDescricoesCadastros(respSf.solicitacoes || [])),
+    aditivosDaListagem,
+    alteracoes,
+  )
   const solicitacoesComRecebimentos = await Promise.all(
     solicitacoes.map(async (sf) => {
       if (sf.id == null) return { ...sf, recebimentos: [] }
@@ -468,7 +501,9 @@ async function comDetalhes(contrato) {
     solicitacoesFornecimento: solicitacoesComRecebimentos,
     anexosTextos: respAnexosTextos.anexos || [],
     // Registros da rotina "Textos" — documento "textos contrato X".
-    textos: respAnexosTextos.textos || [],
+    // `contratacao` de cada texto também só traz o id interno — vira o
+    // sequencial (ver enriquecerSequenciaisContratacao).
+    textos: await enriquecerSequenciaisContratacao(respAnexosTextos.textos || [], contrato),
     anexosPublicacao: (respAnexosPublicacao && !respAnexosPublicacao.erro && respAnexosPublicacao.anexos) || [],
     publicacoes: await enriquecerVeiculosPublicacao((respPublicacoes && !respPublicacoes.erro && respPublicacoes.publicacoes) || []),
     responsaveis: respResponsaveis.responsaveis || [],
