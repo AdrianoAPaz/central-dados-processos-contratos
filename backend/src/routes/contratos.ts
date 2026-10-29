@@ -1144,9 +1144,12 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
     arquivoZip.append(buffer, { name: `${slug(tituloApostilamento(apostilamento))}.xlsx` });
   }
 
+  // Todas as solicitações de fornecimento agrupadas numa pasta só, com o número
+  // da contratação (ex.: "solicitacoes-de-fornecimento-12-2026/") — pedido do usuário.
+  const pastaSolicitacoes = slug(`solicitações de fornecimento ${tituloContrato(contrato).replace(/^contrato\s*/, '')}`);
   for (const solicitacao of contrato.solicitacoesFornecimento) {
     const buffer = await workbookParaBuffer(workbookSolicitacaoFornecimento(solicitacao));
-    arquivoZip.append(buffer, { name: `${slug(tituloSolicitacaoFornecimento(solicitacao))}.xlsx` });
+    arquivoZip.append(buffer, { name: `${pastaSolicitacoes}/${slug(tituloSolicitacaoFornecimento(solicitacao))}.xlsx` });
   }
 
   for (const interacao of contrato.interacoesContabilidade) {
