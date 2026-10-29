@@ -247,6 +247,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  // Cadastro de fundamento legal (GET fundamentoslegais/{id}, confirmado ao
+  // vivo): o contrato traz só o id; `descricao` é o texto da tela, ex.:
+  // "Lei 14.133/2021, Art. 74, II".
+  if (message.type === 'buscar-fundamento-legal') {
+    buscarItemDeSubrecurso(`fundamentoslegais/${limparId(message.id)}`)
+      .then((fundamento) => sendResponse({ fundamento }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
   // Responsáveis do contrato (fiscal, gestor etc., com período de vigência).
   // Endpoint confirmado ao vivo pelo usuário (2026-09-17): GET
   // contratacoes/{id}/responsaveiscontratacao — diferente do que constava no

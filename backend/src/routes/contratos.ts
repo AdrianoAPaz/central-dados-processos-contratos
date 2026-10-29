@@ -308,7 +308,66 @@ contratosRouter.get('/:id', async (req, res) => {
   res.json(contrato);
 });
 
-const CAMPOS_RELATORIO: Array<{ label: string; valor: (c: NonNullable<Awaited<ReturnType<typeof buscarContrato>>>) => string | number | null }> = [
+type Obj = Record<string, unknown>;
+
+function obj(v: unknown): Obj {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Obj) : {};
+}
+
+// Valores em enum do Betha (ex.: CONTRATACAO_DIRETA) como aparecem na tela.
+// Mesmo mapa de browser-extension/src/shared/campos-relatorio.js.
+const ROTULOS_ENUM: Record<string, string> = {
+  CONTRATACAO_DIRETA: 'Contratação direta',
+  LICITACAO: 'Licitação',
+  QUANTIDADE: 'Quantidade',
+  VALOR: 'Valor',
+};
+
+function rotuloEnum(v: unknown): string | null {
+  if (typeof v !== 'string' || !v.trim()) return null;
+  const chave = v.trim();
+  if (ROTULOS_ENUM[chave]) return ROTULOS_ENUM[chave];
+  const texto = chave.replace(/_/g, ' ').toLowerCase();
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
+function simNao(v: unknown): string | null {
+  return v == null ? null : v ? 'Sim' : 'Não';
+}
+
+function textoFundamentoLegal(v: unknown): string | null {
+  const f = obj(v);
+  if (typeof f.descricao === 'string' && f.descricao) return f.descricao;
+  const partes = [
+    f.leiFormatado ? `Lei ${String(f.leiFormatado)}` : '',
+    f.artigo != null ? `Art. ${String(f.artigo)}` : '',
+    f.inciso ? String(f.inciso) : '',
+  ].filter(Boolean);
+  return partes.length ? partes.join(', ') : null;
+}
+
+type ContratoRelatorio = NonNullable<Awaited<ReturnType<typeof buscarContrato>>>;
+
+// Campos da tela "Informações gerais" do contrato que não têm coluna própria
+// no banco — saem do JSON cru (`dadosBrutos`).
+function origemProcessoBruto(c: ContratoRelatorio): Obj {
+  return obj(obj(c.dadosBrutos).processoAdministrativoContratoBO);
+}
+
+function entidadeOrigemProcesso(c: ContratoRelatorio): string | null {
+  const bruto = obj(c.dadosBrutos);
+  const origem = obj(obj(bruto.processoAdministrativo).entidade);
+  if (typeof origem.nome === 'string' && origem.nome) return origem.nome;
+  const entidade = obj(bruto.entidade);
+  return origem.id != null && origem.id === entidade.id ? ((entidade.nome as string) ?? null) : null;
+}
+
+function quantidadeDeDias(c: ContratoRelatorio): number | null {
+  if (!c.dataInicioVigencia || !c.dataFimVigencia) return null;
+  return Math.round((c.dataFimVigencia.getTime() - c.dataInicioVigencia.getTime()) / 86400000);
+}
+
+const CAMPOS_RELATORIO: Array<{ label: string; valor: (c: ContratoRelatorio) => string | number | null }> = [
   { label: 'Sequencial', valor: (c) => c.sequencial },
   { label: 'Número/Ano', valor: (c) => c.numeroFormatado },
   { label: 'Tipo de instrumento', valor: (c) => c.tipoInstrumentoDesc },
@@ -318,10 +377,37 @@ const CAMPOS_RELATORIO: Array<{ label: string; valor: (c: NonNullable<Awaited<Re
   { label: 'CPF/CNPJ do fornecedor', valor: (c) => c.fornecedorCpfCnpj },
   { label: 'Entidade', valor: (c) => c.entidadeNome },
   { label: 'CNPJ da entidade', valor: (c) => c.entidadeCnpj },
+  { label: 'Origem', valor: (c) => (obj(c.dadosBrutos).origemDesc as string) ?? rotuloEnum(obj(c.dadosBrutos).origem) },
+  { label: 'Entidade origem do processo', valor: (c) => entidadeOrigemProcesso(c) },
   { label: 'Processo administrativo', valor: (c) => (c.processoNumero != null ? `${c.processoNumero}/${c.processoAno ?? ''}` : null) },
+  {
+    label: 'Forma de contratação',
+    valor: (c) => rotuloEnum(obj(c.dadosBrutos).formaContratacao ?? origemProcessoBruto(c).tipoContratacao),
+  },
+  { label: 'Modalidade', valor: (c) => (origemProcessoBruto(c).descricaoModalidade as string) ?? null },
+  { label: 'Fundamento legal', valor: (c) => textoFundamentoLegal(obj(c.dadosBrutos).fundamentacaoLegal) },
+  {
+    label: 'Nº/ano da licitação',
+    valor: (c) => {
+      const o = origemProcessoBruto(c);
+      return o.numeroSequencial != null ? `${String(o.numeroSequencial)}/${o.anoSequencial != null ? String(o.anoSequencial) : ''}` : null;
+    },
+  },
+  {
+    label: 'Tipo de objeto',
+    valor: (c) => {
+      const t = obj(obj(c.dadosBrutos).tipoObjeto);
+      return ((t.descricao ?? t.tipoDescricao) as string) ?? null;
+    },
+  },
+  { label: 'Controlar saldo por', valor: (c) => rotuloEnum(obj(c.dadosBrutos).tipoControleSaldo) },
+  { label: 'Controlar itens por organograma', valor: (c) => simNao(obj(c.dadosBrutos).controlaSaldoOrganograma) },
+  { label: 'Orçamento sigiloso', valor: (c) => simNao(obj(c.dadosBrutos).orcamentoSigiloso) },
   { label: 'Data de assinatura', valor: (c) => formatarData(c.dataAssinatura) },
   { label: 'Início da vigência', valor: (c) => formatarData(c.dataInicioVigencia) },
   { label: 'Fim da vigência', valor: (c) => formatarData(c.dataFimVigencia) },
+  { label: 'Quantidade de dias', valor: (c) => quantidadeDeDias(c) },
+  { label: 'Vigência por prazo indeterminado', valor: (c) => simNao(obj(c.dadosBrutos).vigenciaIndeterminada) },
   { label: 'Valor original (R$)', valor: (c) => (c.valorOriginal != null ? Number(c.valorOriginal) : null) },
   { label: 'Valor de aditivos (R$)', valor: (c) => (c.valorAditivos != null ? Number(c.valorAditivos) : null) },
   { label: 'Valor de solicitações de fornecimento (R$)', valor: (c) => (c.valorSolFornec != null ? Number(c.valorSolFornec) : null) },

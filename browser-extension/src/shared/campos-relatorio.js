@@ -16,12 +16,60 @@ export function tituloContrato(c) {
   return numero ? `contrato ${numero}` : 'contrato'
 }
 
+// Valores em enum do Betha (ex.: CONTRATACAO_DIRETA) como aparecem na tela
+// ("Contratação direta"): troca o `_` por espaço e capitaliza a primeira letra.
+// Os que têm acento na tela entram em ROTULOS_ENUM.
+const ROTULOS_ENUM = {
+  CONTRATACAO_DIRETA: 'Contratação direta',
+  LICITACAO: 'Licitação',
+  QUANTIDADE: 'Quantidade',
+  VALOR: 'Valor',
+}
+
+function rotuloEnum(valor) {
+  if (typeof valor !== 'string' || !valor.trim()) return ''
+  const chave = valor.trim()
+  if (ROTULOS_ENUM[chave]) return ROTULOS_ENUM[chave]
+  const texto = chave.replace(/_/g, ' ').toLowerCase()
+  return texto.charAt(0).toUpperCase() + texto.slice(1)
+}
+
+function simNao(valor) {
+  return valor == null ? '' : valor ? 'Sim' : 'Não'
+}
+
+// "Qtde de dias" da tela: diferença entre início e fim da vigência.
+function quantidadeDeDias(inicio, fim) {
+  const a = new Date(inicio)
+  const b = new Date(fim)
+  if (!inicio || !fim || Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return ''
+  return Math.round((b.getTime() - a.getTime()) / 86400000)
+}
+
+// "Lei 14.133/2021, Art. 74, II" — `descricao` do cadastro de fundamentos
+// legais (buscado por popup.js, ver enriquecerFundamentoLegal); sem ela, monta
+// o mesmo texto a partir de lei/artigo/inciso quando vierem no registro.
+function textoFundamentoLegal(f) {
+  if (!f || typeof f !== 'object') return ''
+  if (f.descricao) return String(f.descricao)
+  const partes = [f.leiFormatado ? `Lei ${f.leiFormatado}` : '', f.artigo != null ? `Art. ${f.artigo}` : '', f.inciso || '']
+  return partes.filter(Boolean).join(', ')
+}
+
 export function montarCamposRelatorio(c) {
   const numero = formatarNumeroContrato(c)
   const tipoInstrumento = c.tipoInstrumento || {}
   const fornecedorPessoa = (c.fornecedor && c.fornecedor.pessoa) || {}
   const entidade = c.entidade || {}
   const processo = c.processoAdministrativo || {}
+  // Dados do processo/licitação de origem (tela "Informações gerais").
+  const origemProcesso = c.processoAdministrativoContratoBO || {}
+  const entidadeOrigem = processo.entidade || {}
+  const nomeEntidadeOrigem = entidadeOrigem.nome || (entidadeOrigem.id != null && entidadeOrigem.id === entidade.id ? entidade.nome : '')
+  const licitacao =
+    origemProcesso.numeroSequencial != null
+      ? `${origemProcesso.numeroSequencial}/${origemProcesso.anoSequencial ?? ''}`
+      : ''
 
   return [
     { label: 'Sequencial', valor: c.sequencial ?? '' },
@@ -33,10 +81,22 @@ export function montarCamposRelatorio(c) {
     { label: 'CPF/CNPJ do fornecedor', valor: fornecedorPessoa.cpfCnpj || '' },
     { label: 'Entidade', valor: entidade.nome || '' },
     { label: 'CNPJ da entidade', valor: entidade.cnpj || '' },
+    { label: 'Origem', valor: c.origemDesc || rotuloEnum(c.origem) },
+    { label: 'Entidade origem do processo', valor: nomeEntidadeOrigem },
     { label: 'Processo administrativo', valor: processo.numero != null ? `${processo.numero}/${processo.ano ?? ''}` : '' },
+    { label: 'Forma de contratação', valor: rotuloEnum(c.formaContratacao || origemProcesso.tipoContratacao) },
+    { label: 'Modalidade', valor: origemProcesso.descricaoModalidade || '' },
+    { label: 'Fundamento legal', valor: textoFundamentoLegal(c.fundamentacaoLegal) },
+    { label: 'Nº/ano da licitação', valor: licitacao },
+    { label: 'Tipo de objeto', valor: (c.tipoObjeto && (c.tipoObjeto.descricao || c.tipoObjeto.tipoDescricao)) || '' },
+    { label: 'Controlar saldo por', valor: rotuloEnum(c.tipoControleSaldo) },
+    { label: 'Controlar itens por organograma', valor: simNao(c.controlaSaldoOrganograma) },
+    { label: 'Orçamento sigiloso', valor: simNao(c.orcamentoSigiloso) },
     { label: 'Data de assinatura', valor: formatarData(c.dataAssinatura) },
     { label: 'Início da vigência', valor: formatarData(c.dataInicioVigencia) },
     { label: 'Fim da vigência', valor: formatarData(c.dataFimVigencia) },
+    { label: 'Quantidade de dias', valor: quantidadeDeDias(c.dataInicioVigencia, c.dataFimVigencia) },
+    { label: 'Vigência por prazo indeterminado', valor: simNao(c.vigenciaIndeterminada) },
     { label: 'Valor original (R$)', valor: formatarValor(c.valorOriginal) },
     { label: 'Valor de aditivos (R$)', valor: formatarValor(c.valorAditivos) },
     { label: 'Valor de solicitações de fornecimento (R$)', valor: formatarValor(c.valorSolFornec) },
