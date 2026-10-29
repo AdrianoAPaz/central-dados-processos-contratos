@@ -244,12 +244,32 @@ function ehChaveMonetaria(chave) {
   return /^(valor|vl|preco)/i.test(chave)
 }
 
+// A tela de itens mostra unidade, valor unitário e valor total, mas na API esses
+// dados vêm dentro de objetos aninhados (`especificacao.unidadeMedida`,
+// `configuracao.valorUnitario`) — formato visto no item do processo 246/2026
+// (2026-10-29). Sobe cada um para uma chave própria (sem sobrescrever uma que
+// já exista), pra virar coluna da tabela.
+function completarItemDaTela(raw) {
+  if (!raw || typeof raw !== 'object') return raw
+  const completo = { ...raw }
+  const unidade = (raw.especificacao && raw.especificacao.unidadeMedida) || raw.unidadeMedida
+  if (completo.unidade == null && unidade != null) completo.unidade = unidade
+  const configuracao = raw.configuracao && typeof raw.configuracao === 'object' ? raw.configuracao : {}
+  if (completo.valorUnitario == null && configuracao.valorUnitario != null) completo.valorUnitario = configuracao.valorUnitario
+  if (completo.valorTotal == null) {
+    const total = raw.total != null ? raw.total : configuracao.valorTotal
+    if (total != null) completo.valorTotal = total
+  }
+  return completo
+}
+
 // Tabela com até MAX_COLUNAS_TABELA colunas escolhidas pelos dados presentes
 // (preferidas primeiro, depois as demais na ordem em que aparecem).
 // `omitidas` diz quantas colunas ficaram de fora, pro PDF avisar que o Excel
 // tem o resto. `p` é o processo dono dos registros (ver valorProcesso).
-export function montarTabelaGenerica(registros, excluir = [], p = null) {
-  if (!Array.isArray(registros) || !registros.length) return { colunas: [], linhas: [], omitidas: 0 }
+export function montarTabelaGenerica(registrosOriginais, excluir = [], p = null) {
+  if (!Array.isArray(registrosOriginais) || !registrosOriginais.length) return { colunas: [], linhas: [], omitidas: 0 }
+  const registros = registrosOriginais.map(completarItemDaTela)
 
   const presentes = []
   for (const raw of registros) {
@@ -283,6 +303,39 @@ function camposDe(raw, p, ocultar = []) {
   return Object.entries(raw || {})
     .filter(([chave]) => !ocultar.includes(chave))
     .map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorProcesso(chave, valor, p) }))
+}
+
+// Proposta de um participante (`participantes/{id}/propostas/itens`): é uma
+// linha por item, com o processo, o participante e o item repetidos por dentro
+// (centenas de caracteres de JSON). A tela mostra item, unidade, quantidade,
+// valores, classificação ("1º") e situação ("Venceu"), então esses saem em
+// campos próprios (formato visto no processo 246/2026, 2026-10-29) e os
+// objetos aninhados repetidos ficam de fora; o resto segue como veio.
+const CHAVES_PROPOSTA_ANINHADAS = ['classificacao', 'item', 'participante', 'processoAdministrativo', 'participanteId', 'participanteNome']
+
+function camposProposta(proposta, p) {
+  const classificacao = proposta.classificacao && typeof proposta.classificacao === 'object' ? proposta.classificacao : {}
+  const item = proposta.item && typeof proposta.item === 'object' ? proposta.item : {}
+  const itemParticipante = classificacao.itemParticipante && typeof classificacao.itemParticipante === 'object' ? classificacao.itemParticipante : {}
+  const itemDoProcesso = item.numero != null ? item : itemParticipante.item || {}
+  const material = itemDoProcesso.material || {}
+  const especificacao = itemDoProcesso.especificacao || {}
+  const descricaoItem = material.descricao || especificacao.nome || ''
+  const unidade = especificacao.unidadeMedida || itemDoProcesso.unidadeMedida
+  const situacao = classificacao.situacaoDesc || proposta.situacaoDesc || proposta.situacao || ''
+  const dados = [
+    { label: 'Item', valor: [itemDoProcesso.numero, descricaoItem].filter((v) => v != null && v !== '').join(' - ') },
+    { label: 'Unidade', valor: unidade ? valorProcesso('unidade', unidade, p) : '' },
+    { label: 'Quantidade', valor: proposta.quantidade ?? itemDoProcesso.quantidade ?? '' },
+    { label: 'Valor unitário (R$)', valor: formatarValor(proposta.valorUnitarioPercentual ?? classificacao.valor) },
+    { label: 'Valor total (R$)', valor: formatarValor(proposta.valorTotal) },
+    { label: 'Classificação', valor: classificacao.colocacao != null ? `${classificacao.colocacao}º` : '' },
+    { label: 'Situação', valor: situacao },
+    { label: 'Tipo de participação', valor: itemDoProcesso.tipoParticipacao || '' },
+  ]
+  const usadas = new Set(['quantidade', 'valorUnitarioPercentual', 'valorTotal', 'situacao', 'situacaoDesc', ...CHAVES_PROPOSTA_ANINHADAS])
+  const demais = camposDe(proposta, p, [...usadas]).filter((campo) => campo.valor !== '')
+  return [...dados, ...demais]
 }
 
 function nomeParticipante(raw) {
@@ -329,7 +382,7 @@ export function montarDocumentosParticipantesIndividuais(p) {
       const sufixo = dele.length > 1 ? ` (${i + 1}/${dele.length})` : ''
       blocos.push({
         titulo: `proposta do participante ${index + 1}${sufixo}`,
-        campos: camposDe(proposta, p, ['participanteId', 'participanteNome']),
+        campos: camposProposta(proposta, p),
       })
     })
 
