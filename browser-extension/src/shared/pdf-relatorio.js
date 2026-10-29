@@ -215,7 +215,11 @@ export function gerarPdfSolicitacaoFornecimento(secao) {
 // `secao` é uma entrada de montarSecoesInteracoesContabilidade.
 export function gerarPdfInteracaoContabilidade(secao) {
   const { doc, cursor: inicio } = novoDocumento(secao.titulo)
-  desenharTabelaCampos(doc, inicio, secao.campos)
+  const cursor = desenharTabelaCampos(doc, inicio, secao.campos)
+  // Trilha de auditoria: quem registrou cada situação e quando.
+  if (secao.tabelaHistorico.linhas.length) {
+    desenharTabelaDinamica(doc, desenharTitulo(doc, cursor, 'Histórico', 13), secao.tabelaHistorico)
+  }
   return doc.output('blob')
 }
 

@@ -306,18 +306,19 @@ export function montarSecoesSolicitacoesFornecimento(solicitacoes) {
 // local do Betha, sem fuso) — exibido como dd/mm/aaaa hh:mm:ss sem converter.
 export function montarTabelaHistorico(historico) {
   if (!Array.isArray(historico) || !historico.length) return { colunas: [], linhas: [] }
-  const ordenados = [...historico].sort((a, b) =>
-    String((a && a.dataHoraCriacao) || '').localeCompare(String((b && b.dataHoraCriacao) || '')),
-  )
+  // Solicitação de fornecimento: `dataHoraCriacao`/`observacao`; interação
+  // contábil (integracaocontabildados): `dhHistorico`/`informacao`.
+  const dataHora = (h) => (h && (h.dataHoraCriacao || h.dhHistorico)) || ''
+  const ordenados = [...historico].sort((a, b) => String(dataHora(a)).localeCompare(String(dataHora(b))))
   return {
     colunas: ['Registrado por', 'Data/hora', 'Situação', 'Observação'],
     linhas: ordenados.map((h) => {
       const usuario = h && h.usuario
       return [
         (usuario && (usuario.nome || usuario.id)) || '',
-        formatarDataHora(h && h.dataHoraCriacao),
+        formatarDataHora(dataHora(h)),
         valorTexto(h && (h.situacaoDesc || h.situacao)),
-        valorTexto(h && h.observacao),
+        valorTexto(h && (h.observacao || h.informacao)),
       ]
     }),
   }
@@ -346,6 +347,8 @@ export function montarSecoesInteracoesContabilidade(interacoes) {
     const campos = []
     const contexto = { entidades: indexarEntidades(raw) }
     for (const [chave, valor] of Object.entries(raw || {})) {
+      // `historico` vira tabela própria (ver montarTabelaHistorico), não campo.
+      if (chave === 'historico') continue
       // `contratacao` vira "Sequencial da contratação" — só o sequencial
       // (injetado por popup.js, ver enriquecerSequenciaisContratacao), não o
       // objeto cru com flags/id interno que o Betha devolve.
@@ -369,7 +372,7 @@ export function montarSecoesInteracoesContabilidade(interacoes) {
         campos.push({ label: 'Número/ano do empenho', valor: valorNumeroEmpenho(raw) })
       }
     }
-    return { titulo, campos }
+    return { titulo, campos, tabelaHistorico: montarTabelaHistorico(raw && raw.historico) }
   })
 }
 

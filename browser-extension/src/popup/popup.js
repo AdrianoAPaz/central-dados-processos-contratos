@@ -553,11 +553,27 @@ async function comDetalhes(contrato) {
     anexosPublicacao: (respAnexosPublicacao && !respAnexosPublicacao.erro && respAnexosPublicacao.anexos) || [],
     publicacoes: await enriquecerVeiculosPublicacao((respPublicacoes && !respPublicacoes.erro && respPublicacoes.publicacoes) || []),
     responsaveis: respResponsaveis.responsaveis || [],
-    interacoesContabilidade: await enriquecerSequenciaisContratacao(
-      await enriquecerNumerosDespesa(respInteracoes.interacoes || []),
+    interacoesContabilidade: await anexarHistoricoInteracoes(
+      await enriquecerSequenciaisContratacao(await enriquecerNumerosDespesa(respInteracoes.interacoes || []), contrato),
       contrato,
     ),
   }
+}
+
+// Histórico (quem registrou cada situação e quando) de cada interação
+// contábil — best-effort: erro vira "sem histórico", não trava o relatório.
+async function anexarHistoricoInteracoes(interacoes, contrato) {
+  return Promise.all(
+    interacoes.map(async (interacao) => {
+      if (!interacao || interacao.id == null) return interacao
+      const resp = await chrome.runtime.sendMessage({
+        type: 'buscar-historico-interacao',
+        contratoId: contrato.id,
+        interacaoId: interacao.id,
+      })
+      return { ...interacao, historico: (resp && !resp.erro && resp.historico) || [] }
+    }),
+  )
 }
 
 async function enviar(contrato, botao) {
