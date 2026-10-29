@@ -10,6 +10,7 @@ import {
   PASTA_ATAS_REGISTRO_PRECO,
   SUBRECURSOS_EM_TABELA,
   montarCamposProcesso,
+  montarDocumentosParticipantesIndividuais,
   montarDocumentosSubrecursos,
   montarTabelaGenerica,
   subrecurso,
@@ -81,10 +82,19 @@ export function gerarPdfSubrecurso(documento) {
 export function listarDocumentosProcesso(processo) {
   const documentos = [{ nome: `${slug(tituloProcesso(processo))}.pdf`, gerar: () => gerarPdfProcesso(processo) }]
   for (const documento of montarDocumentosSubrecursos(processo)) {
-    if (documento.chave === 'atas') continue
+    if (documento.chave === 'atas' || documento.chave === 'participantes') continue
     documentos.push({ nome: `${slug(documento.titulo)}.pdf`, gerar: () => gerarPdfSubrecurso(documento) })
   }
   return documentos
+}
+
+// Um PDF por participante (com as propostas dele), pra pasta
+// PASTA_PARTICIPANTES do zip.
+export function listarDocumentosParticipantes(processo) {
+  return montarDocumentosParticipantesIndividuais(processo).map((documento) => ({
+    nome: `${slug(documento.titulo)}.pdf`,
+    gerar: () => gerarPdfSubrecurso(documento),
+  }))
 }
 
 // PDF de UMA ata de registro de preço (ver montarAtasRegistroPreco): todos os
