@@ -188,14 +188,38 @@ export function gerarPdfApostilamento(secao) {
 // devolveu + itens vinculados a ela) — `secao` é uma entrada de
 // montarSecoesSolicitacoesFornecimento. Mesmo estilo de gerarPdfAditivo.
 export function gerarPdfSolicitacaoFornecimento(secao) {
-  return gerarPdfAditivo(secao)
+  const { doc, cursor: inicio } = novoDocumento(secao.titulo)
+  let cursor = desenharTabelaCampos(doc, inicio, secao.campos)
+
+  if (secao.tabelaItens.linhas.length) {
+    cursor = desenharTitulo(doc, cursor, 'Itens', 13)
+    cursor = desenharTabelaDinamica(doc, cursor, secao.tabelaItens)
+  } else {
+    cursor = garantirEspaco(doc, cursor, 16)
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'italic')
+    doc.text('Sem itens vinculados', MARGEM, cursor)
+    doc.setFont('helvetica', 'normal')
+    cursor += 20
+  }
+
+  // Trilha de auditoria: quem registrou cada situação e quando.
+  if (secao.tabelaHistorico.linhas.length) {
+    cursor = desenharTitulo(doc, cursor, 'Histórico', 13)
+    desenharTabelaDinamica(doc, cursor, secao.tabelaHistorico)
+  }
+  return doc.output('blob')
 }
 
 // PDF de UMA interação contábil (todos os campos que a API devolveu) —
 // `secao` é uma entrada de montarSecoesInteracoesContabilidade.
 export function gerarPdfInteracaoContabilidade(secao) {
   const { doc, cursor: inicio } = novoDocumento(secao.titulo)
-  desenharTabelaCampos(doc, inicio, secao.campos)
+  const cursor = desenharTabelaCampos(doc, inicio, secao.campos)
+  // Trilha de auditoria: quem registrou cada situação e quando.
+  if (secao.tabelaHistorico.linhas.length) {
+    desenharTabelaDinamica(doc, desenharTitulo(doc, cursor, 'Histórico', 13), secao.tabelaHistorico)
+  }
   return doc.output('blob')
 }
 

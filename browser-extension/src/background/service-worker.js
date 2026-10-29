@@ -180,6 +180,34 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  // Histórico (auditoria: quem registrou cada mudança de situação e quando) de
+  // UMA solicitação de fornecimento. Endpoint confirmado ao vivo na tela
+  // "Histórico" do Betha (2026-10-29): GET contratacoes/{id}/
+  // solicitacoesfornecimento/{sfId}/historico — cada registro traz `usuario`
+  // ({id, nome}), `dataHoraCriacao`, `situacaoDesc` e `observacao`.
+  // Best-effort: erro vira sem histórico, não trava o relatório.
+  if (message.type === 'buscar-historico-solicitacao') {
+    buscarSubrecurso(
+      `${ENDPOINT_CONTRATACOES}/${limparId(message.contratoId)}/solicitacoesfornecimento/${limparId(message.solicitacaoId)}/historico`,
+    )
+      .then((historico) => sendResponse({ historico }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
+  // Histórico de UMA interação contábil (popover "Últimas alterações" do
+  // Betha, confirmado ao vivo em 2026-10-29): GET contratacoes/{id}/
+  // interacaocontabil/{interacaoId}/integracaocontabildados — cada registro
+  // traz `usuario`, `dhHistorico`, `situacaoDesc` e `informacao`. Best-effort.
+  if (message.type === 'buscar-historico-interacao') {
+    buscarSubrecurso(
+      `${ENDPOINT_CONTRATACOES}/${limparId(message.contratoId)}/interacaocontabil/${limparId(message.interacaoId)}/integracaocontabildados`,
+    )
+      .then((historico) => sendResponse({ historico }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
   // Itens de UM recebimento específico. Endpoint confirmado ao vivo pelo
   // usuário (2026-09-17), ver buscarItensRecebimento abaixo.
   if (message.type === 'buscar-itens-recebimento') {

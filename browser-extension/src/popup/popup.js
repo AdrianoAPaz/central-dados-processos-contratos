@@ -499,6 +499,15 @@ async function comDetalhes(contrato) {
         itensSf = (respItensSf && !respItensSf.erro && respItensSf.itens) || []
       }
 
+      // Histórico (quem registrou cada situação e quando) — best-effort, como
+      // os itens: erro vira "sem histórico", não trava o relatório.
+      const respHistorico = await chrome.runtime.sendMessage({
+        type: 'buscar-historico-solicitacao',
+        contratoId: contrato.id,
+        solicitacaoId: sf.id,
+      })
+      const historico = (respHistorico && !respHistorico.erro && respHistorico.historico) || []
+
       const resp = await chrome.runtime.sendMessage({
         type: 'buscar-recebimentos',
         contratoId: contrato.id,
@@ -519,7 +528,7 @@ async function comDetalhes(contrato) {
           return { ...recebimento, itens: (respItens && respItens.itens) || [] }
         }),
       )
-      return { ...sf, itens: ordenarItensPorNumero(itensSf), recebimentos: recebimentosComItens }
+      return { ...sf, itens: ordenarItensPorNumero(itensSf), historico, recebimentos: recebimentosComItens }
     }),
   )
 
@@ -544,11 +553,27 @@ async function comDetalhes(contrato) {
     anexosPublicacao: (respAnexosPublicacao && !respAnexosPublicacao.erro && respAnexosPublicacao.anexos) || [],
     publicacoes: await enriquecerVeiculosPublicacao((respPublicacoes && !respPublicacoes.erro && respPublicacoes.publicacoes) || []),
     responsaveis: respResponsaveis.responsaveis || [],
-    interacoesContabilidade: await enriquecerSequenciaisContratacao(
-      await enriquecerNumerosDespesa(respInteracoes.interacoes || []),
+    interacoesContabilidade: await anexarHistoricoInteracoes(
+      await enriquecerSequenciaisContratacao(await enriquecerNumerosDespesa(respInteracoes.interacoes || []), contrato),
       contrato,
     ),
   }
+}
+
+// Histórico (quem registrou cada situação e quando) de cada interação
+// contábil — best-effort: erro vira "sem histórico", não trava o relatório.
+async function anexarHistoricoInteracoes(interacoes, contrato) {
+  return Promise.all(
+    interacoes.map(async (interacao) => {
+      if (!interacao || interacao.id == null) return interacao
+      const resp = await chrome.runtime.sendMessage({
+        type: 'buscar-historico-interacao',
+        contratoId: contrato.id,
+        interacaoId: interacao.id,
+      })
+      return { ...interacao, historico: (resp && !resp.erro && resp.historico) || [] }
+    }),
+  )
 }
 
 async function enviar(contrato, botao) {
