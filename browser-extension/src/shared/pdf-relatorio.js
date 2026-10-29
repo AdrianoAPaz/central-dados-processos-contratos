@@ -299,8 +299,11 @@ export function listarDocumentosRelatorio(contrato) {
     documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfApostilamento(secao) })
   }
 
+  // Todas as solicitações de fornecimento agrupadas numa pasta só, com o número
+  // da contratação (ex.: "solicitacoes-de-fornecimento-12-2026/") — pedido do usuário.
+  const pastaSolicitacoes = slug(`solicitações de fornecimento ${tituloContrato(contrato).replace(/^contrato\s*/, '')}`)
   for (const secao of montarSecoesSolicitacoesFornecimento(contrato.solicitacoesFornecimento)) {
-    documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfSolicitacaoFornecimento(secao) })
+    documentos.push({ nome: `${pastaSolicitacoes}/${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfSolicitacaoFornecimento(secao) })
   }
 
   for (const secao of montarSecoesInteracoesContabilidade(contrato.interacoesContabilidade)) {
