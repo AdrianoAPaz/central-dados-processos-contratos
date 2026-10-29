@@ -1106,6 +1106,24 @@ async function enriquecerResponsaveis(sessao, registros, cache) {
   return resultado
 }
 
+// O tipo do parecer vem só com o id (`descricao: null`, formato confirmado pelo
+// usuário em 2026-10-29) e cairia no JSON cru. Busca o cadastro
+// (GET tipospareceres, tem poucas dezenas de registros) uma vez e completa cada
+// parecer pelo id. Falha ao buscar deixa o registro como veio.
+async function enriquecerTiposParecer(sessao, registros) {
+  const resp = await getCompras(sessao, 'tipospareceres', { filter: '', limit: '100', offset: '0', sort: '' })
+  if (!resp.ok) throw new Error(`API do Betha respondeu ${resp.status} ao buscar tipospareceres`)
+  const dados = await resp.json()
+  const tipos = new Map((Array.isArray(dados) ? dados : dados.content || []).map((t) => [String(t.id), t]))
+  return registros.map((registro) => {
+    const chave = Object.keys(registro || {}).find((k) => /^tipo.*parecer/i.test(k))
+    const atual = chave && registro[chave]
+    if (!atual || typeof atual !== 'object' || atual.id == null || atual.descricao != null) return registro
+    const completo = tipos.get(String(atual.id))
+    return completo ? { ...registro, [chave]: { ...atual, ...completo } } : registro
+  })
+}
+
 // Todos os sub-recursos de um processo — um por vez (mesma cautela contra
 // rajada dos demais). Falha em UM sub-recurso (ex.: 403/500) não derruba os
 // outros: vira aviso. Devolve `{ subrecursos: { <tipo>: [...] }, avisos }`.
@@ -1133,6 +1151,12 @@ async function buscarDetalhesProcesso(processoId, arquivosInline) {
     } catch (e) {
       avisos.push(`responsáveis dos ${rotulo}: ${String((e && e.message) || e)}`)
     }
+  }
+
+  try {
+    subrecursos.pareceres = await enriquecerTiposParecer(sessao, subrecursos.pareceres || [])
+  } catch (e) {
+    avisos.push(`tipos dos pareceres: ${String((e && e.message) || e)}`)
   }
 
   try {
