@@ -192,6 +192,15 @@ async function carregar() {
         bloco.appendChild(semItens)
       }
 
+      // Histórico (quem registrou cada situação e quando).
+      const tabelaHistoricoSf = criarTabelaDinamica(secao.tabelaHistorico)
+      if (tabelaHistoricoSf) {
+        const h4 = document.createElement('h4')
+        h4.textContent = 'Histórico'
+        bloco.appendChild(h4)
+        bloco.appendChild(tabelaHistoricoSf)
+      }
+
       container.appendChild(bloco)
     }
   }

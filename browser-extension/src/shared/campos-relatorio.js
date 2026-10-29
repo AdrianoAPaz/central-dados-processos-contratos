@@ -293,11 +293,39 @@ export function montarSecoesSolicitacoesFornecimento(solicitacoes) {
     // fornecimento 197/2026" pra solicitação 197 de 2026 (sem a palavra
     // "relatório").
     const titulo = `solicitação de fornecimento ${numero ?? index + 1}`
-    const { itens, recebimentos: _recebimentos, ...demaisCampos } = raw || {}
+    const { itens, recebimentos: _recebimentos, historico, ...demaisCampos } = raw || {}
     const campos = camposDinamicos(demaisCampos, raw)
     const tabelaItens = montarTabelaItens(itens)
-    return { titulo, campos, tabelaItens }
+    return { titulo, campos, tabelaItens, tabelaHistorico: montarTabelaHistorico(historico) }
   })
+}
+
+// Histórico de um registro (tela "Histórico" do Betha) — trilha de auditoria:
+// quem registrou cada mudança de situação e quando. Cronológico (mais antigo
+// primeiro). `dataHoraCriacao` vem como "2026-10-29 11:10:42.363" (horário
+// local do Betha, sem fuso) — exibido como dd/mm/aaaa hh:mm:ss sem converter.
+export function montarTabelaHistorico(historico) {
+  if (!Array.isArray(historico) || !historico.length) return { colunas: [], linhas: [] }
+  const ordenados = [...historico].sort((a, b) =>
+    String((a && a.dataHoraCriacao) || '').localeCompare(String((b && b.dataHoraCriacao) || '')),
+  )
+  return {
+    colunas: ['Registrado por', 'Data/hora', 'Situação', 'Observação'],
+    linhas: ordenados.map((h) => {
+      const usuario = h && h.usuario
+      return [
+        (usuario && (usuario.nome || usuario.id)) || '',
+        formatarDataHora(h && h.dataHoraCriacao),
+        valorTexto(h && (h.situacaoDesc || h.situacao)),
+        valorTexto(h && h.observacao),
+      ]
+    }),
+  }
+}
+
+function formatarDataHora(texto) {
+  const m = typeof texto === 'string' && texto.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}:\d{2}:\d{2})/)
+  return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}` : texto ? String(texto) : ''
 }
 
 // Cada interação contábil (empenhar/liquidar/pagar) vinculada ao contrato

@@ -499,6 +499,15 @@ async function comDetalhes(contrato) {
         itensSf = (respItensSf && !respItensSf.erro && respItensSf.itens) || []
       }
 
+      // Histórico (quem registrou cada situação e quando) — best-effort, como
+      // os itens: erro vira "sem histórico", não trava o relatório.
+      const respHistorico = await chrome.runtime.sendMessage({
+        type: 'buscar-historico-solicitacao',
+        contratoId: contrato.id,
+        solicitacaoId: sf.id,
+      })
+      const historico = (respHistorico && !respHistorico.erro && respHistorico.historico) || []
+
       const resp = await chrome.runtime.sendMessage({
         type: 'buscar-recebimentos',
         contratoId: contrato.id,
@@ -519,7 +528,7 @@ async function comDetalhes(contrato) {
           return { ...recebimento, itens: (respItens && respItens.itens) || [] }
         }),
       )
-      return { ...sf, itens: ordenarItensPorNumero(itensSf), recebimentos: recebimentosComItens }
+      return { ...sf, itens: ordenarItensPorNumero(itensSf), historico, recebimentos: recebimentosComItens }
     }),
   )
 
