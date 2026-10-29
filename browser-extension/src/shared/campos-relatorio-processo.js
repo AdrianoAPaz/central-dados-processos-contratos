@@ -408,8 +408,36 @@ export function montarDocumentosParticipantesIndividuais(p) {
       })
     })
 
-    return { chave: 'participante', titulo: `${rotulo} do ${base}`, blocos }
+    return {
+      chave: 'participante',
+      titulo: `${rotulo} do ${base}`,
+      blocos,
+      blocosParticipante: blocos.slice(0, 1),
+      propostas: montarTabelaPropostas(dele, p),
+    }
   })
+}
+
+// Propostas do participante em lista (uma linha por item, como as tabelas de
+// itens dos outros relatórios): colunas = campos de camposProposta, na ordem em
+// que aparecem, até MAX_COLUNAS_TABELA.
+function montarTabelaPropostas(propostas, p) {
+  const campos = propostas.map((proposta) => camposProposta(proposta, p))
+  const colunas = []
+  for (const lista of campos) {
+    for (const { label } of lista) if (!colunas.includes(label)) colunas.push(label)
+  }
+  const escolhidas = colunas.slice(0, MAX_COLUNAS_TABELA)
+  return {
+    colunas: escolhidas,
+    linhas: campos.map((lista) =>
+      escolhidas.map((label) => {
+        const campo = lista.find((c) => c.label === label)
+        return campo && campo.valor != null ? String(campo.valor) : ''
+      }),
+    ),
+    omitidas: colunas.length - escolhidas.length,
+  }
 }
 
 // Um documento por sub-recurso em `SUBRECURSOS_EM_DOCUMENTO` que tenha
