@@ -51,7 +51,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'buscar-detalhes-processo') {
-    buscarDetalhesProcesso(message.id, message.arquivos)
+    buscarDetalhesProcesso(message.id, message.arquivos, message.processo)
       .then(sendResponse)
       .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
     return true
@@ -1052,11 +1052,22 @@ async function buscarPropostasParticipantes(sessao, processoId, participantes) {
   const propostas = []
   for (const participante of participantes) {
     if (!participante || participante.id == null) continue
-    const registros = await buscarSubrecursoProcesso(
-      sessao,
-      processoId,
-      `participantes/${limparId(participante.id)}/propostas`,
-    )
+    // A tela do processo lê `participantes/{id}/propostas/itens` (valor unitário
+    // e total de cada item, confirmado no código da página em 2026-10-29); o
+    // `propostas` puro não devolvia nada no processo 246/2026 (participante com
+    // "Possui proposta" = true e relatório "Nenhuma proposta encontrada").
+    const registros = []
+    for (const sufixo of ['propostas/itens', 'propostas']) {
+      const encontrados = await buscarSubrecursoProcesso(
+        sessao,
+        processoId,
+        `participantes/${limparId(participante.id)}/${sufixo}`,
+      )
+      if (encontrados.length) {
+        registros.push(...encontrados)
+        break
+      }
+    }
     for (const proposta of registros) {
       propostas.push({ ...proposta, participanteId: participante.id, participanteNome: nomeParticipante(participante) })
     }
@@ -1160,13 +1171,64 @@ async function enriquecerTiposParecer(sessao, registros) {
   })
 }
 
+// Campos do processo que a tela mostra pelo nome do cadastro mas a API devolve
+// só como `{ id }` (ex.: Condição de pagamento = "30 DIAS" chega como
+// `formaPagamento: { id: 17224 }`; confirmado no relatório do processo 246/2026,
+// 2026-10-29). chave do campo -> recurso do cadastro (nomes vistos nas rotas do
+// próprio Compras).
+const CADASTROS_DO_PROCESSO = {
+  formaPagamento: 'formaspagamento',
+  prazoEntrega: 'prazosentrega',
+  localEntrega: 'locaisentrega',
+  regimeExecucao: 'regimesexecucao',
+}
+
+// Completa o processo com o que a tela dele mostra e a listagem não traz: os
+// campos do GET de detalhe (`processosadministrativo/{id}`, ex.: observações,
+// vigência, categoria, organogramas) e o cadastro de cada campo acima. Devolve
+// só os campos novos/completados, pra quem chama mesclar por cima do processo;
+// falha em uma consulta vira aviso e o campo fica como veio.
+async function completarProcesso(sessao, processo, avisos) {
+  const completado = {}
+  try {
+    const resp = await getCompras(sessao, `${ENDPOINT_PROCESSOS}/${limparId(processo.id)}`)
+    if (resp.ok) {
+      const detalhe = await resp.json()
+      if (detalhe && typeof detalhe === 'object' && !Array.isArray(detalhe)) Object.assign(completado, detalhe)
+    }
+  } catch (e) {
+    avisos.push(`detalhe do processo: ${String((e && e.message) || e)}`)
+  }
+
+  const cache = new Map()
+  for (const [chave, recurso] of Object.entries(CADASTROS_DO_PROCESSO)) {
+    const atual = completado[chave] !== undefined ? completado[chave] : processo[chave]
+    if (!atual || typeof atual !== 'object' || Array.isArray(atual) || atual.id == null) continue
+    const id = String(atual.id)
+    const chaveCache = `${recurso}/${id}`
+    try {
+      if (!cache.has(chaveCache)) {
+        const resp = await getCompras(sessao, `${recurso}/${limparId(id)}`)
+        cache.set(chaveCache, resp.ok ? await resp.json() : null)
+      }
+      const cadastro = cache.get(chaveCache)
+      if (cadastro && typeof cadastro === 'object') completado[chave] = { ...atual, ...cadastro }
+    } catch (e) {
+      avisos.push(`${chave}: ${String((e && e.message) || e)}`)
+    }
+  }
+  return completado
+}
+
 // Todos os sub-recursos de um processo — um por vez (mesma cautela contra
 // rajada dos demais). Falha em UM sub-recurso (ex.: 403/500) não derruba os
 // outros: vira aviso. Devolve `{ subrecursos: { <tipo>: [...] }, avisos }`.
-async function buscarDetalhesProcesso(processoId, arquivosInline) {
+async function buscarDetalhesProcesso(processoId, arquivosInline, processo) {
   const sessao = await exigirSessaoCompras()
   const subrecursos = {}
   const avisos = []
+
+  const processoCompletado = await completarProcesso(sessao, { ...(processo || {}), id: processoId }, avisos)
 
   for (const [tipo, caminho] of Object.entries(SUBRECURSOS_PROCESSO)) {
     try {
@@ -1221,7 +1283,7 @@ async function buscarDetalhesProcesso(processoId, arquivosInline) {
     avisos.push(`anexos: ${String((e && e.message) || e)}`)
   }
 
-  return { subrecursos, avisos }
+  return { subrecursos, avisos, processo: processoCompletado }
 }
 
 function enviarParaCentral(contrato) {

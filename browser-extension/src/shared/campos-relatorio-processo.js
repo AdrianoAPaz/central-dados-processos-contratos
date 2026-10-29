@@ -31,6 +31,11 @@ import {
 // `p` é o processo dono do registro (pra resolver as referências a ele e as
 // entidades só com id).
 function valorProcesso(chave, valor, p) {
+  // A tela mostra data e hora dos registros (ex.: parecer "26/10/2026
+  // 10:46:37"); o formato padrão do relatório cortaria a hora. Lê os números
+  // da própria string, sem converter fuso. Meia-noite fica só com a data.
+  const dataHora = typeof valor === 'string' && valor.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)/)
+  if (dataHora && !/^00:00(:00)?$/.test(dataHora[4]) && !/(Z|[+-]\d{2}:?\d{2})$/i.test(valor)) return `${dataHora[3]}/${dataHora[2]}/${dataHora[1]} ${dataHora[4]}`
   if (valor && typeof valor === 'object' && !Array.isArray(valor)) {
     if (valor.simbolo != null) return String(valor.simbolo)
     const especifico = valorObjetoProcesso(chave, valor, p)
@@ -52,6 +57,13 @@ function valorObjetoProcesso(chave, valor, p) {
     if (valor.numeroProcesso != null) return String(valor.numeroProcesso)
   }
   if (chave === 'parametroExercicio' && valor.exercicio != null) return String(valor.exercicio)
+  // Cadastros de entrega/pagamento/execução: a tela mostra a descrição. O local
+  // de entrega pode vir sem descrição (só endereço): cai no logradouro. Sem
+  // nenhum texto (cadastro não resolvido) segue o JSON cru, pra análise manual.
+  if (['formaPagamento', 'prazoEntrega', 'localEntrega', 'regimeExecucao'].includes(chave)) {
+    const texto = valor.descricao || valor.nome || valor.logradouro
+    if (texto) return String(texto)
+  }
   // `contratacao` do processo: dados da licitação/contratação direta —
   // modalidade + número sequencial (ex.: "Concorrência eletrônica 4/2026").
   if (chave === 'contratacao' && valor.numeroSequencial != null) {
@@ -155,22 +167,66 @@ const CHAVES_PRINCIPAIS = new Set([
   'subrecursos',
 ])
 
+// Rótulos que a tela do Compras usa (formulário "Editando processo
+// administrativo") para campos cujo nome na API é diferente.
+const ROTULOS_PROCESSO = {
+  formaPagamento: 'Condição de pagamento',
+  prazoEntrega: 'Prazo de entrega',
+  localEntrega: 'Local de entrega',
+  regimeExecucao: 'Regime de execução',
+  formaJulgamento: 'Forma de julgamento',
+  orcamentoSigiloso: 'Orçamento sigiloso',
+  previsaoSubcontratacao: 'Previsão de subcontratação',
+  controleSaldo: 'Controlar saldo por',
+  controleSaldoDesc: 'Controlar saldo por (descrição)',
+}
+
+// Tipo de objeto (tela: "Compras e Serviços"): objeto com descrição ou enum em
+// texto (ex.: COMPRAS_SERVICOS), que vira palavras.
+function descricaoTipoObjeto(tipoObjeto) {
+  if (tipoObjeto == null || tipoObjeto === '') return ''
+  if (typeof tipoObjeto === 'object') {
+    return String(tipoObjeto.tipoDescricao || tipoObjeto.descricao || tipoObjeto.nome || tipoObjeto.tipo || '')
+  }
+  const texto = String(tipoObjeto).replace(/_/g, ' ').toLowerCase()
+  return texto.charAt(0).toUpperCase() + texto.slice(1)
+}
+
 export function montarCamposProcesso(p) {
-  const tipoObjeto = p.tipoObjeto || {}
+  const contratacao = p.contratacao && typeof p.contratacao === 'object' ? p.contratacao : {}
   const principais = [
     { label: 'Número/Ano', valor: numeroProcesso(p) },
     { label: 'Situação', valor: p.situacaoDesc || p.situacao || '' },
-    { label: 'Modalidade', valor: tipoObjeto.tipoDescricao || tipoObjeto.descricao || '' },
+    // Na tela o campo "Modalidade" vem da contratação; "Tipo de objeto" é outro.
+    { label: 'Modalidade', valor: (contratacao.modalidade && contratacao.modalidade.descricao) || '' },
+    { label: 'Tipo de objeto', valor: descricaoTipoObjeto(p.tipoObjeto) },
     { label: 'Objeto', valor: p.objeto || '' },
     { label: 'Data do processo', valor: formatarData(p.dataProcesso) },
     { label: 'Valor total dos itens (R$)', valor: formatarValor(p.valorTotalItens) },
     { label: 'Quantidade de itens', valor: p.quantidadeItens ?? subrecurso(p, 'itens').length },
   ]
+  // Tela "Forma de contratação" do processo: tipo, fundamento legal, registro
+  // de preço, autoridade competente, comissão e data da autorização, que o
+  // relatório só trazia como o número da contratação. Só entram os que vierem
+  // preenchidos (nomes dos campos vistos no objeto `contratacao`, 2026-10-29).
+  const formaContratacao = [
+    ['Forma de contratação (tipo)', contratacao.formaContratacaoDesc || contratacao.formaContratacao],
+    ['Fundamento legal', contratacao.fundamentacaoLegal],
+    ['Registro de preço', contratacao.registroPreco],
+    ['Modo de disputa', contratacao.modoDisputa],
+    ['Número da chamada pública', contratacao.numeroChamadaPublica],
+    ['Autoridade competente', contratacao.responsavel],
+    ['Comissão responsável', contratacao.membroComissao],
+    ['Data da autorização', contratacao.dataAutorizacaoAdesaoAtaRegPreco],
+  ]
+    .filter(([, valor]) => valor != null && valor !== '')
+    .map(([label, valor]) => ({ label, valor: typeof valor === 'boolean' ? (valor ? 'Sim' : 'Não') : valorProcesso('campo', valor, p) }))
+  principais.push(...formaContratacao)
   // Demais campos que a API devolveu (pedido do usuário no Contratos: "todas
   // as informações") — depois dos principais, na ordem em que vierem.
   const demais = Object.entries(p)
     .filter(([chave]) => !CHAVES_PRINCIPAIS.has(chave))
-    .map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorProcesso(chave, valor, p) }))
+    .map(([chave, valor]) => ({ label: ROTULOS_PROCESSO[chave] || formatarChave(chave), valor: valorProcesso(chave, valor, p) }))
   return [...principais, ...demais]
 }
 
@@ -210,12 +266,32 @@ function ehChaveMonetaria(chave) {
   return /^(valor|vl|preco)/i.test(chave)
 }
 
+// A tela de itens mostra unidade, valor unitário e valor total, mas na API esses
+// dados vêm dentro de objetos aninhados (`especificacao.unidadeMedida`,
+// `configuracao.valorUnitario`) — formato visto no item do processo 246/2026
+// (2026-10-29). Sobe cada um para uma chave própria (sem sobrescrever uma que
+// já exista), pra virar coluna da tabela.
+function completarItemDaTela(raw) {
+  if (!raw || typeof raw !== 'object') return raw
+  const completo = { ...raw }
+  const unidade = (raw.especificacao && raw.especificacao.unidadeMedida) || raw.unidadeMedida
+  if (completo.unidade == null && unidade != null) completo.unidade = unidade
+  const configuracao = raw.configuracao && typeof raw.configuracao === 'object' ? raw.configuracao : {}
+  if (completo.valorUnitario == null && configuracao.valorUnitario != null) completo.valorUnitario = configuracao.valorUnitario
+  if (completo.valorTotal == null) {
+    const total = raw.total != null ? raw.total : configuracao.valorTotal
+    if (total != null) completo.valorTotal = total
+  }
+  return completo
+}
+
 // Tabela com até MAX_COLUNAS_TABELA colunas escolhidas pelos dados presentes
 // (preferidas primeiro, depois as demais na ordem em que aparecem).
 // `omitidas` diz quantas colunas ficaram de fora, pro PDF avisar que o Excel
 // tem o resto. `p` é o processo dono dos registros (ver valorProcesso).
-export function montarTabelaGenerica(registros, excluir = [], p = null) {
-  if (!Array.isArray(registros) || !registros.length) return { colunas: [], linhas: [], omitidas: 0 }
+export function montarTabelaGenerica(registrosOriginais, excluir = [], p = null) {
+  if (!Array.isArray(registrosOriginais) || !registrosOriginais.length) return { colunas: [], linhas: [], omitidas: 0 }
+  const registros = registrosOriginais.map(completarItemDaTela)
 
   const presentes = []
   for (const raw of registros) {
@@ -225,8 +301,12 @@ export function montarTabelaGenerica(registros, excluir = [], p = null) {
   }
 
   const preferidas = COLUNAS_PREFERIDAS.filter((c) => presentes.includes(c))
-  const restantes = presentes.filter((c) => !preferidas.includes(c))
-  const ordenadas = [...preferidas, ...restantes]
+  // Depois das preferidas, o que a tela de itens mostra (unidade, valores,
+  // situação) vem antes dos campos técnicos, que no processo 246/2026 tomaram
+  // as 8 colunas e deixaram valor unitário/total de fora.
+  const daTela = presentes.filter((c) => !preferidas.includes(c) && /^(unidade|valor|vl|preco|total|situacao)/i.test(c))
+  const restantes = presentes.filter((c) => !preferidas.includes(c) && !daTela.includes(c))
+  const ordenadas = [...preferidas, ...daTela, ...restantes]
   const escolhidas = ordenadas.slice(0, MAX_COLUNAS_TABELA)
 
   return {
@@ -245,6 +325,39 @@ function camposDe(raw, p, ocultar = []) {
   return Object.entries(raw || {})
     .filter(([chave]) => !ocultar.includes(chave))
     .map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorProcesso(chave, valor, p) }))
+}
+
+// Proposta de um participante (`participantes/{id}/propostas/itens`): é uma
+// linha por item, com o processo, o participante e o item repetidos por dentro
+// (centenas de caracteres de JSON). A tela mostra item, unidade, quantidade,
+// valores, classificação ("1º") e situação ("Venceu"), então esses saem em
+// campos próprios (formato visto no processo 246/2026, 2026-10-29) e os
+// objetos aninhados repetidos ficam de fora; o resto segue como veio.
+const CHAVES_PROPOSTA_ANINHADAS = ['classificacao', 'item', 'participante', 'processoAdministrativo', 'participanteId', 'participanteNome']
+
+function camposProposta(proposta, p) {
+  const classificacao = proposta.classificacao && typeof proposta.classificacao === 'object' ? proposta.classificacao : {}
+  const item = proposta.item && typeof proposta.item === 'object' ? proposta.item : {}
+  const itemParticipante = classificacao.itemParticipante && typeof classificacao.itemParticipante === 'object' ? classificacao.itemParticipante : {}
+  const itemDoProcesso = item.numero != null ? item : itemParticipante.item || {}
+  const material = itemDoProcesso.material || {}
+  const especificacao = itemDoProcesso.especificacao || {}
+  const descricaoItem = material.descricao || especificacao.nome || ''
+  const unidade = especificacao.unidadeMedida || itemDoProcesso.unidadeMedida
+  const situacao = classificacao.situacaoDesc || proposta.situacaoDesc || proposta.situacao || ''
+  const dados = [
+    { label: 'Item', valor: [itemDoProcesso.numero, descricaoItem].filter((v) => v != null && v !== '').join(' - ') },
+    { label: 'Unidade', valor: unidade ? valorProcesso('unidade', unidade, p) : '' },
+    { label: 'Quantidade', valor: proposta.quantidade ?? itemDoProcesso.quantidade ?? '' },
+    { label: 'Valor unitário (R$)', valor: formatarValor(proposta.valorUnitarioPercentual ?? classificacao.valor) },
+    { label: 'Valor total (R$)', valor: formatarValor(proposta.valorTotal) },
+    { label: 'Classificação', valor: classificacao.colocacao != null ? `${classificacao.colocacao}º` : '' },
+    { label: 'Situação', valor: situacao },
+    { label: 'Tipo de participação', valor: itemDoProcesso.tipoParticipacao || '' },
+  ]
+  const usadas = new Set(['quantidade', 'valorUnitarioPercentual', 'valorTotal', 'situacao', 'situacaoDesc', ...CHAVES_PROPOSTA_ANINHADAS])
+  const demais = camposDe(proposta, p, [...usadas]).filter((campo) => campo.valor !== '')
+  return [...dados, ...demais]
 }
 
 function nomeParticipante(raw) {
@@ -291,7 +404,7 @@ export function montarDocumentosParticipantesIndividuais(p) {
       const sufixo = dele.length > 1 ? ` (${i + 1}/${dele.length})` : ''
       blocos.push({
         titulo: `proposta do participante ${index + 1}${sufixo}`,
-        campos: camposDe(proposta, p, ['participanteId', 'participanteNome']),
+        campos: camposProposta(proposta, p),
       })
     })
 
