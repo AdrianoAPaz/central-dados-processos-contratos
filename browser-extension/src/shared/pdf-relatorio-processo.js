@@ -10,6 +10,7 @@ import {
   PASTA_ATAS_REGISTRO_PRECO,
   SUBRECURSOS_EM_TABELA,
   montarCamposProcesso,
+  montarDocumentosParticipantesIndividuais,
   montarDocumentosSubrecursos,
   montarTabelaGenerica,
   subrecurso,
@@ -81,10 +82,41 @@ export function gerarPdfSubrecurso(documento) {
 export function listarDocumentosProcesso(processo) {
   const documentos = [{ nome: `${slug(tituloProcesso(processo))}.pdf`, gerar: () => gerarPdfProcesso(processo) }]
   for (const documento of montarDocumentosSubrecursos(processo)) {
-    if (documento.chave === 'atas') continue
+    if (documento.chave === 'atas' || documento.chave === 'participantes') continue
     documentos.push({ nome: `${slug(documento.titulo)}.pdf`, gerar: () => gerarPdfSubrecurso(documento) })
   }
   return documentos
+}
+
+// Um PDF por participante (com as propostas dele), pra pasta
+// PASTA_PARTICIPANTES do zip.
+export function listarDocumentosParticipantes(processo) {
+  return montarDocumentosParticipantesIndividuais(processo).map((documento) => ({
+    nome: `${slug(documento.titulo)}.pdf`,
+    gerar: () => gerarPdfParticipante(documento),
+  }))
+}
+
+// PDF de UM participante: os campos dele e, em lista, as propostas por item.
+function gerarPdfParticipante(documento) {
+  const { doc, cursor: inicio } = novoDocumento(documento.titulo)
+  let cursor = inicio
+  for (const bloco of documento.blocosParticipante) {
+    cursor = desenharTitulo(doc, cursor, bloco.titulo, 12)
+    cursor = desenharTabelaCampos(doc, cursor, bloco.campos)
+  }
+  const { propostas } = documento
+  cursor = desenharTitulo(doc, cursor, `Propostas do participante (${propostas.linhas.length})`, 13)
+  if (propostas.linhas.length) {
+    cursor = desenharTabelaDinamica(doc, cursor, propostas)
+    desenharAvisoOmitidas(doc, cursor, propostas.omitidas)
+  } else {
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'italic')
+    doc.text('Nenhuma proposta encontrada', 40, cursor + 4)
+    doc.setFont('helvetica', 'normal')
+  }
+  return doc.output('blob')
 }
 
 // PDF de UMA ata de registro de preço (ver montarAtasRegistroPreco): todos os

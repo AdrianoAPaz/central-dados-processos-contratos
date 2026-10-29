@@ -127,10 +127,15 @@ async function enriquecerNumerosDespesa(interacoes) {
       const chaveCache = `${despesaId}|${data}`
       if (!cache.has(chaveCache)) {
         const resp = await chrome.runtime.sendMessage({ type: 'buscar-numero-despesa', despesaId, data })
-        cache.set(chaveCache, resp && !resp.erro ? resp.numero : null)
+        cache.set(chaveCache, resp && !resp.erro ? { numero: resp.numero, recurso: resp.recurso } : null)
       }
-      const numero = cache.get(chaveCache)
-      desdobramentosEnriquecidos.push(numero != null ? { ...item, despesa: { ...item.despesa, numero } } : item)
+      const dadosDespesa = cache.get(chaveCache)
+      const numero = dadosDespesa && dadosDespesa.numero
+      const recurso = dadosDespesa && dadosDespesa.recurso
+      const extras = {}
+      if (numero != null) extras.numero = numero
+      if (recurso != null) extras.recurso = recurso
+      desdobramentosEnriquecidos.push(Object.keys(extras).length ? { ...item, despesa: { ...item.despesa, ...extras } } : item)
     }
     resultado.push({ ...interacao, desdobramento: desdobramentosEnriquecidos })
   }
@@ -148,6 +153,8 @@ async function enriquecerNumerosDespesa(interacoes) {
 const RESOLVEDORES_DESCRICAO = [
   { chave: /^loca(l|is)entrega/i, mensagem: 'buscar-locais-entrega', lista: 'locais' },
   { chave: /^tipoobjeto/i, mensagem: 'buscar-tipos-objeto', lista: 'tipos' },
+  { chave: /^formas?pagamento/i, mensagem: 'buscar-formas-pagamento', lista: 'formas' },
+  { chave: /^prazos?(de)?entrega/i, mensagem: 'buscar-prazos-entrega', lista: 'prazos' },
 ]
 
 // Valor do campo pode ser o objeto do cadastro ({ id, ... }) ou só o id.
@@ -216,8 +223,8 @@ async function enriquecerResponsaveis(registros) {
   return resultado
 }
 
-// `contratacao` de cada interação contábil só traz o id interno da
-// contratação — o relatório mostra o sequencial dela (o mesmo do documento do
+// `contratacao` de cada interação contábil (e de cada texto do contrato) só
+// traz o id interno da contratação — o relatório mostra o sequencial dela (o mesmo do documento do
 // contrato; pedido do usuário, 2026-10-14). Quando o id é o do próprio
 // contrato (o caso normal, já que as interações vêm de
 // contratacoes/{id}/interacaocontabil) usa o sequencial que já temos; só vai
@@ -372,6 +379,33 @@ function separarAlteracoes(alteracoes, aditivosConhecidos) {
   return { apostilamentos, rescisoes, suspensoes, outrasAlteracoes, aditivosExtras }
 }
 
+// O campo `aditivo` da solicitação de fornecimento vem só com `{ arquivos: [],
+// id }` (pedido do usuário, 2026-10-23) — os dados do aditivo (sequencial,
+// tipo, valor…) estão na listagem de alterações do contrato
+// (contratacoes/{id}/alteracoes, `idAlteracao` = id do aditivo). Resolve pelo
+// id usando os aditivos que já temos (listagem de aditivos + alterações; as
+// alterações, formato confirmado ao vivo, têm prioridade). Best-effort: id que
+// não aparece em nenhuma das duas fica como veio.
+function enriquecerAditivosSolicitacoes(solicitacoes, aditivosDaListagem, alteracoes) {
+  const porId = new Map()
+  for (const aditivo of aditivosDaListagem) {
+    if (aditivo && aditivo.id != null) porId.set(String(aditivo.id), aditivo)
+  }
+  for (const alteracao of alteracoes) {
+    if (!alteracao || String(alteracao.tipoAlteracao || '').toUpperCase() !== 'ADITIVO') continue
+    const aditivo = achatarAlteracao(alteracao)
+    const id = aditivo.id ?? alteracao.idAlteracao
+    if (id != null) porId.set(String(id), aditivo)
+  }
+
+  return solicitacoes.map((sf) => {
+    const valor = sf && sf.aditivo
+    const completo = porId.get(idDoValor(valor))
+    if (!completo) return sf
+    return { ...sf, aditivo: typeof valor === 'object' ? { ...valor, ...completo } : completo }
+  })
+}
+
 async function comDetalhes(contrato) {
   if (contrato.id == null) return contrato
 
@@ -442,7 +476,11 @@ async function comDetalhes(contrato) {
   // buscado por cima de cada recebimento. Endpoints confirmados (ver
   // service-worker.js): erro em qualquer um interrompe o relatório, mesmo
   // critério das solicitações de fornecimento em si.
-  const solicitacoes = await enriquecerResponsaveis(await enriquecerDescricoesCadastros(respSf.solicitacoes || []))
+  const solicitacoes = enriquecerAditivosSolicitacoes(
+    await enriquecerResponsaveis(await enriquecerDescricoesCadastros(respSf.solicitacoes || [])),
+    aditivosDaListagem,
+    alteracoes,
+  )
   const solicitacoesComRecebimentos = await Promise.all(
     solicitacoes.map(async (sf) => {
       if (sf.id == null) return { ...sf, recebimentos: [] }
@@ -500,7 +538,9 @@ async function comDetalhes(contrato) {
     solicitacoesFornecimento: solicitacoesComRecebimentos,
     anexosTextos: respAnexosTextos.anexos || [],
     // Registros da rotina "Textos" — documento "textos contrato X".
-    textos: respAnexosTextos.textos || [],
+    // `contratacao` de cada texto também só traz o id interno — vira o
+    // sequencial (ver enriquecerSequenciaisContratacao).
+    textos: await enriquecerSequenciaisContratacao(respAnexosTextos.textos || [], contrato),
     anexosPublicacao: (respAnexosPublicacao && !respAnexosPublicacao.erro && respAnexosPublicacao.anexos) || [],
     publicacoes: await enriquecerVeiculosPublicacao((respPublicacoes && !respPublicacoes.erro && respPublicacoes.publicacoes) || []),
     responsaveis: respResponsaveis.responsaveis || [],
@@ -635,17 +675,93 @@ async function carregarProcessoCompleto(processo) {
     type: 'buscar-detalhes-processo',
     id: processo.id,
     arquivos: processo.arquivos,
+    processo,
   })
   if (detalhes && detalhes.erro) throw new Error(detalhes.erro)
   return {
     avisos: detalhes.avisos || [],
     processoCompleto: {
       ...processo,
+      ...(detalhes.processo || {}),
       exercicio: contextoCompras.exercicio,
       entidadeToken: contextoCompras.entidade,
       subrecursos: detalhes.subrecursos,
     },
   }
+}
+
+// Entidade do processo (Compras) x entidade da contratação (Contratos): os dois
+// sistemas ficam abertos em sessões independentes, então nada impede o usuário
+// de estar numa entidade em um e noutra no outro — e o número do processo se
+// repete entre entidades, o que atrelaria contratações de outra entidade. A
+// comparação usa o que cada registro trouxer, do mais ao menos confiável: CNPJ,
+// nome, id. Sem dado em comum devolve null (não dá pra afirmar nada).
+function textoNormalizado(valor) {
+  return String(valor == null ? '' : valor)
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase()
+}
+
+// `{ id, nome, cnpj }` da entidade de um registro. O Compras costuma trazer só
+// `{ id }` na entidade do processo; o nome aparece em outro ponto do mesmo
+// registro (sob chaves `entidade*`), por isso o índice id -> nome do registro.
+function identificarEntidade(entidade, nomesPorId) {
+  if (!entidade || typeof entidade !== 'object') return null
+  const id = entidade.id != null ? String(entidade.id) : ''
+  const nome = textoNormalizado(entidade.nome || (nomesPorId && nomesPorId.get(id)) || '')
+  const cnpj = String(entidade.cnpj || '').replace(/\D/g, '')
+  return id || nome || cnpj ? { id, nome, cnpj } : null
+}
+
+function indexarNomesDeEntidades(raiz) {
+  const nomes = new Map()
+  const visitar = (no, chave) => {
+    if (Array.isArray(no)) return no.forEach((item) => visitar(item, chave))
+    if (!no || typeof no !== 'object') return
+    if (/^entidade/i.test(chave) && no.id != null && no.nome != null && !nomes.has(String(no.id))) {
+      nomes.set(String(no.id), String(no.nome))
+    }
+    for (const [k, v] of Object.entries(no)) visitar(v, k)
+  }
+  visitar(raiz, '')
+  return nomes
+}
+
+// true = mesma entidade, false = entidades diferentes, null = não comparável.
+function compararEntidades(a, b) {
+  if (!a || !b) return null
+  for (const campo of ['cnpj', 'nome', 'id']) {
+    if (a[campo] && b[campo]) return a[campo] === b[campo]
+  }
+  return null
+}
+
+function rotuloEntidade(e) {
+  return e.nome || e.cnpj || `id ${e.id}`
+}
+
+// Confere se as contratações vinculadas são da mesma entidade do processo.
+// Lança erro na divergência (nada é enviado/gerado); devolve um aviso quando
+// não há como comparar, ou null quando confere.
+function validarMesmaEntidade(processo, contratacoes) {
+  const doProcesso = identificarEntidade(processo.entidade, indexarNomesDeEntidades(processo))
+  let incomparaveis = 0
+  for (const contratacao of contratacoes) {
+    const daContratacao = identificarEntidade(contratacao.entidade, indexarNomesDeEntidades(contratacao))
+    const mesma = compararEntidades(doProcesso, daContratacao)
+    if (mesma === false) {
+      throw new Error(
+        `As entidades não conferem: o processo do Compras é da entidade "${rotuloEntidade(doProcesso)}", ` +
+          `mas a contratação ${rotuloContratacao(contratacao)} do Contratos é da entidade "${rotuloEntidade(daContratacao)}". ` +
+          'Abra o Compras e o Contratos na mesma entidade e busque de novo.',
+      )
+    }
+    if (mesma === null) incomparaveis++
+  }
+  return incomparaveis ? 'não foi possível conferir se a entidade das contratações é a mesma do processo' : null
 }
 
 // Contratações geradas pelo processo (contratos, atas, compras diretas…), cada
@@ -672,6 +788,9 @@ async function carregarContratacoesVinculadas(processo) {
     avisos.push('a lista de contratações pode estar incompleta (limite de varredura atingido)')
   }
 
+  const avisoEntidade = validarMesmaEntidade(processo, encontradas)
+  if (avisoEntidade) avisos.push(avisoEntidade)
+
   const contratacoes = []
   for (const [i, contratacao] of encontradas.entries()) {
     mostrarMsg(`Buscando os dados da contratação ${i + 1} de ${encontradas.length}…`, 'info')
@@ -688,7 +807,7 @@ async function enviarProcesso(processo, botao) {
   botao.disabled = true
   try {
     const { processoCompleto, avisos } = await carregarProcessoCompleto(processo)
-    const vinculadas = await carregarContratacoesVinculadas(processo)
+    const vinculadas = await carregarContratacoesVinculadas(processoCompleto)
     avisos.push(...vinculadas.avisos)
 
     mostrarMsg('Enviando…', 'info')
@@ -729,7 +848,7 @@ async function gerarPdfProcesso(processo, botao) {
   botao.disabled = true
   try {
     const { processoCompleto, avisos } = await carregarProcessoCompleto(processo)
-    const vinculadas = await carregarContratacoesVinculadas(processo)
+    const vinculadas = await carregarContratacoesVinculadas(processoCompleto)
     avisos.push(...vinculadas.avisos)
 
     // As contratações vão junto do processo, numa aba só: a página monta um

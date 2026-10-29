@@ -337,6 +337,7 @@ export function montarSecoesInteracoesContabilidade(interacoes) {
       // `desdobramento` (ver enriquecerNumerosDespesa).
       if (chave === 'desdobramento') {
         campos.push({ label: 'Despesa', valor: valorNumeroDespesa(valor) })
+        campos.push({ label: 'Recurso', valor: valorRecursoDespesa(valor) })
         campos.push({ label: 'Número/ano do empenho', valor: valorNumeroEmpenho(raw) })
       }
     }
@@ -353,9 +354,11 @@ export function montarSecoesInteracoesContabilidade(interacoes) {
 // estilo de montarSecoesSolicitacoesFornecimento: `comprovantes`/`arquivos`
 // (arrays de objetos) já caem no fallback genérico de valorTexto. `itens` é
 // excluído daqui — vira tabela própria (ver montarTabelaItens), não faz
-// sentido como um campo de texto genérico.
+// sentido como um campo de texto genérico. `solFornec`/`solicitacaoFornecimento`
+// também ficam de fora (pedido do usuário, 2026-10-23): a solicitação já está
+// no título do documento ("recebimentos da solicitação de fornecimento X").
 function montarCamposRecebimento(raw) {
-  const { itens: _itens, ...demaisCampos } = raw || {}
+  const { itens: _itens, solFornec: _solFornec, solicitacaoFornecimento: _solicitacao, ...demaisCampos } = raw || {}
   return camposDinamicos(demaisCampos, raw)
 }
 
@@ -457,10 +460,21 @@ export function tituloBlocoTexto(raw, index) {
 }
 
 function camposTexto(raw, contexto) {
-  return Object.entries(raw || {}).map(([chave, valor]) => ({
-    label: formatarChave(chave),
-    valor: chave === 'conteudo' ? conteudoTexto(valor) : valorCampoDinamico(chave, valor, contexto),
-  }))
+  return Object.entries(raw || {}).map(([chave, valor]) => {
+    // `contratacao` vira "Sequencial da contratação" — só o sequencial
+    // (injetado por popup.js, ver enriquecerSequenciaisContratacao), não o
+    // objeto cru com o id interno (pedido do usuário, 2026-10-23).
+    if (chave === 'contratacao') {
+      return {
+        label: 'Sequencial da contratação',
+        valor: valor && typeof valor === 'object' && valor.sequencial != null ? String(valor.sequencial) : '',
+      }
+    }
+    return {
+      label: formatarChave(chave),
+      valor: chave === 'conteudo' ? conteudoTexto(valor) : valorCampoDinamico(chave, valor, contexto),
+    }
+  })
 }
 
 // `conteudo` do texto vem do editor do Betha — pode ser HTML (parágrafos,
@@ -631,6 +645,16 @@ function valorNumeroDespesa(valor) {
     .join(', ')
 }
 
+// Recurso da despesa (ex.: "1.500.1001.0500") — `despesa.recurso`, injetado
+// por popup.js junto com o número da despesa; em branco quando não veio.
+function valorRecursoDespesa(valor) {
+  const lista = Array.isArray(valor) ? valor : [valor]
+  return lista
+    .map((item) => (item && typeof item === 'object' && item.despesa ? item.despesa.recurso : null))
+    .filter((v) => v != null)
+    .join(', ')
+}
+
 // Número/ano do empenho (ex.: 5426/2026) gerado quando a interação é
 // contabilizada — pedido do usuário (2026-10-21), ano incluído a pedido de
 // 2026-10-27. Confirmado no retorno real do Betha: cada rateio do
@@ -683,6 +707,32 @@ function valorSolicitacaoFornecimento(valor) {
     .map((item) => (item && typeof item === 'object' ? item.numeroAno : item))
     .filter((v) => v != null)
     .join(', ')
+}
+
+// Campo "aditivo" da solicitação de fornecimento — pedido do usuário
+// (2026-10-23): o Betha devolve só `{ arquivos: [], id }`; popup.js completa
+// com o aditivo da listagem de alterações (ver enriquecerAditivosSolicitacoes).
+// Mostra o sequencial (o mesmo do documento "aditivo N"), o tipo, a data e o
+// valor (pedido do usuário, 2026-10-23), ex.: "4 (Renovação Contratual) -
+// 27/11/2025 - R$ 50.510,16". Data/valor ausentes simplesmente não aparecem.
+// Sem sequencial (aditivo não resolvido) cai no valorTexto, que mantém o JSON
+// cru pra conferência manual.
+function ehChaveAditivo(chave) {
+  return chave === 'aditivo'
+}
+
+function valorAditivo(valor) {
+  if (valor.sequencial == null) return valorTexto(valor)
+  const tipo = valor.tipoAditivo && valor.tipoAditivo.descricao
+  const data = formatarData(valor.dataAditivoFonte || valor.dataAssinatura || valor.dataAditivo)
+  const montante = valor.valorAditivo ?? valor.valor
+  return [
+    tipo ? `${valor.sequencial} (${tipo})` : String(valor.sequencial),
+    data,
+    montante != null ? `R$ ${formatarValor(montante)}` : '',
+  ]
+    .filter(Boolean)
+    .join(' - ')
 }
 
 // Veículo de publicação (campo da publicação do contrato cuja chave contém
@@ -749,6 +799,9 @@ export function valorCampoDinamico(chave, valor, contexto = {}) {
   }
   if (ehChaveSolicitacaoFornecimento(chave) && valor != null) {
     return valorSolicitacaoFornecimento(valor)
+  }
+  if (ehChaveAditivo(chave) && valor && typeof valor === 'object' && !Array.isArray(valor)) {
+    return valorAditivo(valor)
   }
   if (ehChaveVeiculo(chave) && valor && typeof valor === 'object') {
     return Array.isArray(valor) ? valor.map(nomeVeiculo).join(', ') : nomeVeiculo(valor)

@@ -51,7 +51,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'buscar-detalhes-processo') {
-    buscarDetalhesProcesso(message.id, message.arquivos)
+    buscarDetalhesProcesso(message.id, message.arquivos, message.processo)
       .then(sendResponse)
       .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
     return true
@@ -212,7 +212,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // devolve `despesa.numero` (ver buscarNumeroDespesa abaixo).
   if (message.type === 'buscar-numero-despesa') {
     buscarNumeroDespesa(message.despesaId, message.data)
-      .then((numero) => sendResponse({ numero }))
+      .then(({ numero, recurso }) => sendResponse({ numero, recurso }))
       .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
     return true
   }
@@ -243,6 +243,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'buscar-tipos-objeto') {
     buscarSubrecurso('tiposobjeto')
       .then((tipos) => sendResponse({ tipos }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
+  // Formas de pagamento cadastradas (id -> descrição, ex.: "30 DIAS APÓS
+  // ENTREGA"). A solicitação de fornecimento só traz o id; endpoint informado
+  // pelo usuário (2026-10-23): GET formaspagamento?filter=&limit=20&offset=0&sort=.
+  if (message.type === 'buscar-formas-pagamento') {
+    buscarSubrecurso('formaspagamento')
+      .then((formas) => sendResponse({ formas }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
+  // Prazos de entrega cadastrados (id -> descrição). A solicitação de
+  // fornecimento só traz o id; endpoint informado pelo usuário (2026-10-23):
+  // GET prazosentrega?filter=&limit=20&offset=0&sort=.
+  if (message.type === 'buscar-prazos-entrega') {
+    buscarSubrecurso('prazosentrega')
+      .then((prazos) => sendResponse({ prazos }))
       .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
     return true
   }
@@ -752,7 +772,23 @@ async function buscarNumeroDespesa(despesaId, data) {
   })
   if (!resp.ok) throw new Error(`API do Betha respondeu ${resp.status} ao buscar a despesa ${despesaId}`)
   const dados = await resp.json()
-  return dados && dados.despesa && dados.despesa.numero != null ? dados.despesa.numero : null
+  const despesa = dados && dados.despesa
+  return {
+    numero: despesa && despesa.numero != null ? despesa.numero : null,
+    recurso: recursoDespesa(dados),
+  }
+}
+
+// Recurso da despesa (pedido do usuário, 2026-10-28), no mesmo retorno do
+// saldo-despesa-na-data — fica na raiz, ao lado de `despesa`, e não dentro
+// dela. Confirmado no retorno real: `recurso: { numero: "150010010500",
+// numeroFormatado: "1.500.1001.0500", descricao: "MDE" }`. Usa o número
+// formatado; sem ele, cai no número cru.
+function recursoDespesa(dados) {
+  const recurso = dados && dados.recurso
+  if (!recurso || typeof recurso !== 'object') return null
+  const valor = recurso.numeroFormatado != null ? recurso.numeroFormatado : recurso.numero
+  return valor != null && typeof valor !== 'object' ? valor : null
 }
 
 // Recebimentos de UMA solicitação de fornecimento. Endpoint confirmado ao
@@ -1046,11 +1082,22 @@ async function buscarPropostasParticipantes(sessao, processoId, participantes) {
   const propostas = []
   for (const participante of participantes) {
     if (!participante || participante.id == null) continue
-    const registros = await buscarSubrecursoProcesso(
-      sessao,
-      processoId,
-      `participantes/${limparId(participante.id)}/propostas`,
-    )
+    // A tela do processo lê `participantes/{id}/propostas/itens` (valor unitário
+    // e total de cada item, confirmado no código da página em 2026-10-29); o
+    // `propostas` puro não devolvia nada no processo 246/2026 (participante com
+    // "Possui proposta" = true e relatório "Nenhuma proposta encontrada").
+    const registros = []
+    for (const sufixo of ['propostas/itens', 'propostas']) {
+      const encontrados = await buscarSubrecursoProcesso(
+        sessao,
+        processoId,
+        `participantes/${limparId(participante.id)}/${sufixo}`,
+      )
+      if (encontrados.length) {
+        registros.push(...encontrados)
+        break
+      }
+    }
     for (const proposta of registros) {
       propostas.push({ ...proposta, participanteId: participante.id, participanteNome: nomeParticipante(participante) })
     }
@@ -1136,13 +1183,82 @@ async function enriquecerResponsaveis(sessao, registros, cache) {
   return resultado
 }
 
+// O tipo do parecer vem só com o id (`descricao: null`, formato confirmado pelo
+// usuário em 2026-10-29) e cairia no JSON cru. Busca o cadastro
+// (GET tipospareceres, tem poucas dezenas de registros) uma vez e completa cada
+// parecer pelo id. Falha ao buscar deixa o registro como veio.
+async function enriquecerTiposParecer(sessao, registros) {
+  const resp = await getCompras(sessao, 'tipospareceres', { filter: '', limit: '100', offset: '0', sort: '' })
+  if (!resp.ok) throw new Error(`API do Betha respondeu ${resp.status} ao buscar tipospareceres`)
+  const dados = await resp.json()
+  const tipos = new Map((Array.isArray(dados) ? dados : dados.content || []).map((t) => [String(t.id), t]))
+  return registros.map((registro) => {
+    const chave = Object.keys(registro || {}).find((k) => /^tipo.*parecer/i.test(k))
+    const atual = chave && registro[chave]
+    if (!atual || typeof atual !== 'object' || atual.id == null || atual.descricao != null) return registro
+    const completo = tipos.get(String(atual.id))
+    return completo ? { ...registro, [chave]: { ...atual, ...completo } } : registro
+  })
+}
+
+// Campos do processo que a tela mostra pelo nome do cadastro mas a API devolve
+// só como `{ id }` (ex.: Condição de pagamento = "30 DIAS" chega como
+// `formaPagamento: { id: 17224 }`; confirmado no relatório do processo 246/2026,
+// 2026-10-29). chave do campo -> recurso do cadastro (nomes vistos nas rotas do
+// próprio Compras).
+const CADASTROS_DO_PROCESSO = {
+  formaPagamento: 'formaspagamento',
+  prazoEntrega: 'prazosentrega',
+  localEntrega: 'locaisentrega',
+  regimeExecucao: 'regimesexecucao',
+}
+
+// Completa o processo com o que a tela dele mostra e a listagem não traz: os
+// campos do GET de detalhe (`processosadministrativo/{id}`, ex.: observações,
+// vigência, categoria, organogramas) e o cadastro de cada campo acima. Devolve
+// só os campos novos/completados, pra quem chama mesclar por cima do processo;
+// falha em uma consulta vira aviso e o campo fica como veio.
+async function completarProcesso(sessao, processo, avisos) {
+  const completado = {}
+  try {
+    const resp = await getCompras(sessao, `${ENDPOINT_PROCESSOS}/${limparId(processo.id)}`)
+    if (resp.ok) {
+      const detalhe = await resp.json()
+      if (detalhe && typeof detalhe === 'object' && !Array.isArray(detalhe)) Object.assign(completado, detalhe)
+    }
+  } catch (e) {
+    avisos.push(`detalhe do processo: ${String((e && e.message) || e)}`)
+  }
+
+  const cache = new Map()
+  for (const [chave, recurso] of Object.entries(CADASTROS_DO_PROCESSO)) {
+    const atual = completado[chave] !== undefined ? completado[chave] : processo[chave]
+    if (!atual || typeof atual !== 'object' || Array.isArray(atual) || atual.id == null) continue
+    const id = String(atual.id)
+    const chaveCache = `${recurso}/${id}`
+    try {
+      if (!cache.has(chaveCache)) {
+        const resp = await getCompras(sessao, `${recurso}/${limparId(id)}`)
+        cache.set(chaveCache, resp.ok ? await resp.json() : null)
+      }
+      const cadastro = cache.get(chaveCache)
+      if (cadastro && typeof cadastro === 'object') completado[chave] = { ...atual, ...cadastro }
+    } catch (e) {
+      avisos.push(`${chave}: ${String((e && e.message) || e)}`)
+    }
+  }
+  return completado
+}
+
 // Todos os sub-recursos de um processo — um por vez (mesma cautela contra
 // rajada dos demais). Falha em UM sub-recurso (ex.: 403/500) não derruba os
 // outros: vira aviso. Devolve `{ subrecursos: { <tipo>: [...] }, avisos }`.
-async function buscarDetalhesProcesso(processoId, arquivosInline) {
+async function buscarDetalhesProcesso(processoId, arquivosInline, processo) {
   const sessao = await exigirSessaoCompras()
   const subrecursos = {}
   const avisos = []
+
+  const processoCompletado = await completarProcesso(sessao, { ...(processo || {}), id: processoId }, avisos)
 
   for (const [tipo, caminho] of Object.entries(SUBRECURSOS_PROCESSO)) {
     try {
@@ -1163,6 +1279,12 @@ async function buscarDetalhesProcesso(processoId, arquivosInline) {
     } catch (e) {
       avisos.push(`responsáveis dos ${rotulo}: ${String((e && e.message) || e)}`)
     }
+  }
+
+  try {
+    subrecursos.pareceres = await enriquecerTiposParecer(sessao, subrecursos.pareceres || [])
+  } catch (e) {
+    avisos.push(`tipos dos pareceres: ${String((e && e.message) || e)}`)
   }
 
   try {
@@ -1191,7 +1313,7 @@ async function buscarDetalhesProcesso(processoId, arquivosInline) {
     avisos.push(`anexos: ${String((e && e.message) || e)}`)
   }
 
-  return { subrecursos, avisos }
+  return { subrecursos, avisos, processo: processoCompletado }
 }
 
 function enviarParaCentral(contrato) {

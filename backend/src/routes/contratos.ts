@@ -543,6 +543,19 @@ function valorNumeroDespesa(valor: unknown): string {
     .join(', ');
 }
 
+// Recurso da despesa (ex.: "1.500.1001.0500") — `despesa.recurso`, injetado
+// pela extensão junto com `despesa.numero`; em branco quando não veio.
+function valorRecursoDespesa(valor: unknown): string {
+  const lista = Array.isArray(valor) ? valor : [valor];
+  return lista
+    .map((item) => {
+      const despesa = item != null && typeof item === 'object' ? (item as Record<string, unknown>).despesa : null;
+      return despesa != null && typeof despesa === 'object' ? (despesa as Record<string, unknown>).recurso : null;
+    })
+    .filter((v) => v != null)
+    .join(', ');
+}
+
 // Número/ano do empenho (ex.: 5426/2026) gerado quando a interação é
 // contabilizada: `empenhoContabilidadeBO.numeroEmpenho` de cada rateio do
 // `desdobramento` (ou `numeroEmpenho` direto no rateio, no "Empenhar"). O
@@ -827,6 +840,7 @@ export function preencherPlanilhaCamposDinamicos(
   planilha: ExcelJS.Worksheet,
   raw: Record<string, unknown>,
   formatar?: (chave: string, valor: unknown) => string | number,
+  rotulos: Record<string, string> = {},
 ) {
   if (!formatar) {
     const contexto = { entidades: indexarEntidades(raw) };
@@ -836,7 +850,7 @@ export function preencherPlanilhaCamposDinamicos(
   preencherPlanilhaCampos(
     planilha,
     Object.entries(raw).flatMap(([chave, valor]) => {
-      const linha = { campo: formatarChave(chave), valor: aplicarFormato(chave, valor) };
+      const linha = { campo: rotulos[chave] ?? formatarChave(chave), valor: aplicarFormato(chave, valor) };
       const codigo = ehChaveOrganograma(chave) ? codigoOrganograma(valor) : '';
       return codigo ? [linha, { campo: 'Código do organograma', valor: codigo }] : [linha];
     }),
@@ -984,6 +998,7 @@ function workbookInteracaoContabilidade(
         ? [
             linha,
             { campo: 'Despesa', valor: valorNumeroDespesa(valor) },
+            { campo: 'Recurso', valor: valorRecursoDespesa(valor) },
             { campo: 'Número/ano do empenho', valor: valorNumeroEmpenho(raw) },
           ]
         : [linha];
@@ -1012,7 +1027,12 @@ function workbookRecebimentos(
     const raw = (recebimento.dadosBrutos ?? {}) as Record<string, unknown>;
     const numero = raw.numero != null ? String(raw.numero) : String(index + 1);
     const planilha = workbook.addWorksheet(`Recebimento ${numero}`.slice(0, 31));
-    preencherPlanilhaCamposDinamicos(planilha, raw);
+    // `solFornec`/`solicitacaoFornecimento` ficam de fora (pedido do usuário,
+    // 2026-10-23) — a solicitação já está no título do documento. Mesmo recorte
+    // de montarCamposRecebimento na extensão (entidades resolvidas pelo registro inteiro).
+    const { solFornec: _solFornec, solicitacaoFornecimento: _solicitacao, ...camposRecebimento } = raw;
+    const contexto = { entidades: indexarEntidades(raw) };
+    preencherPlanilhaCamposDinamicos(planilha, camposRecebimento, (chave, valor) => valorCelulaDinamica(chave, valor, contexto));
 
     if (recebimento.itens.length > 0) {
       const planilhaItens = workbook.addWorksheet(`Recebimento ${numero} - Itens`.slice(0, 31));
@@ -1116,6 +1136,7 @@ function conteudoTexto(valor: unknown): string | number {
 export function workbookTextos(
   textos: Array<{ dadosBrutos: unknown }>,
   formatar?: (raw: Record<string, unknown>, chave: string, valor: unknown) => string | number,
+  rotulos?: Record<string, string>,
 ): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
   if (textos.length === 0) {
@@ -1128,8 +1149,11 @@ export function workbookTextos(
     const valorDoCampo = formatar
       ? (chave: string, valor: unknown) => formatar(raw, chave, valor)
       : (chave: string, valor: unknown) => valorCelulaDinamica(chave, valor, contexto);
-    preencherPlanilhaCamposDinamicos(workbook.addWorksheet(nomeAbaTexto(raw, index)), raw, (chave, valor) =>
-      chave === 'conteudo' ? conteudoTexto(valor) : valorDoCampo(chave, valor),
+    preencherPlanilhaCamposDinamicos(
+      workbook.addWorksheet(nomeAbaTexto(raw, index)),
+      raw,
+      (chave, valor) => (chave === 'conteudo' ? conteudoTexto(valor) : valorDoCampo(chave, valor)),
+      rotulos,
     );
   });
   return workbook;
@@ -1224,14 +1248,20 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
     arquivoZip.append(buffer, { name: `${slug(tituloApostilamento(apostilamento))}.xlsx` });
   }
 
+  // Todas as solicitações de fornecimento agrupadas numa pasta só, com o número
+  // da contratação (ex.: "solicitacoes-de-fornecimento-12-2026/") — pedido do usuário.
+  const pastaSolicitacoes = slug(`solicitações de fornecimento ${tituloContrato(contrato).replace(/^contrato\s*/, '')}`);
   for (const solicitacao of contrato.solicitacoesFornecimento) {
     const buffer = await workbookParaBuffer(workbookSolicitacaoFornecimento(solicitacao));
-    arquivoZip.append(buffer, { name: `${slug(tituloSolicitacaoFornecimento(solicitacao))}.xlsx` });
+    arquivoZip.append(buffer, { name: `${pastaSolicitacoes}/${slug(tituloSolicitacaoFornecimento(solicitacao))}.xlsx` });
   }
 
+  // Todas as interações contábeis agrupadas numa pasta só, "interações" + número
+  // da contratação (ex.: "interacoes-12-2026/") — pedido do usuário.
+  const pastaInteracoes = slug(`interações ${tituloContrato(contrato).replace(/^contrato\s*/, '')}`);
   for (const interacao of contrato.interacoesContabilidade) {
     const buffer = await workbookParaBuffer(workbookInteracaoContabilidade(interacao));
-    arquivoZip.append(buffer, { name: `${slug(tituloInteracaoContabilidade(interacao))}.xlsx` });
+    arquivoZip.append(buffer, { name: `${pastaInteracoes}/${slug(tituloInteracaoContabilidade(interacao))}.xlsx` });
   }
 
   for (const solicitacao of contrato.solicitacoesFornecimento) {
@@ -1246,8 +1276,20 @@ contratosRouter.get('/:id/relatorio', async (req, res) => {
 
   // Entidades só com id resolvidas pelo contrato inteiro (igual ao PDF).
   const entidadesContrato = indexarEntidades([contrato.dadosBrutos, ...contrato.textos.map((t) => t.dadosBrutos)]);
-  const textosXlsx = workbookTextos(contrato.textos, (_raw, chave, valor) =>
-    valorCelulaDinamica(chave, valor, { entidades: entidadesContrato }),
+  // `contratacao` vira "Sequencial da contratação" — só o sequencial (injetado
+  // pela extensão, ver enriquecerSequenciaisContratacao em popup.js), igual ao
+  // PDF e às interações contábeis.
+  const textosXlsx = workbookTextos(
+    contrato.textos,
+    (_raw, chave, valor) => {
+      if (chave === 'contratacao') {
+        const sequencial =
+          valor != null && typeof valor === 'object' ? (valor as Record<string, unknown>).sequencial : null;
+        return sequencial != null ? String(sequencial) : '';
+      }
+      return valorCelulaDinamica(chave, valor, { entidades: entidadesContrato });
+    },
+    { contratacao: 'Sequencial da contratação' },
   );
   arquivoZip.append(await workbookParaBuffer(textosXlsx), {
     name: `${slug(tituloTextos(contrato))}.xlsx`,
