@@ -188,27 +188,167 @@ export function gerarPdfApostilamento(secao) {
 // devolveu + itens vinculados a ela) — `secao` é uma entrada de
 // montarSecoesSolicitacoesFornecimento. Mesmo estilo de gerarPdfAditivo.
 export function gerarPdfSolicitacaoFornecimento(secao) {
-  const { doc, cursor: inicio } = novoDocumento(secao.titulo)
-  let cursor = desenharTabelaCampos(doc, inicio, secao.campos)
+  const { doc, cursor: inicio } = novoDocumentoSobrio(secao.titulo)
+  let cursor = desenharTabelaCamposSobria(doc, inicio, secao.campos)
 
+  cursor = desenharSecaoSobria(doc, cursor, 'Itens')
   if (secao.tabelaItens.linhas.length) {
-    cursor = desenharTitulo(doc, cursor, 'Itens', 13)
-    cursor = desenharTabelaDinamica(doc, cursor, secao.tabelaItens)
+    cursor = desenharTabelaDinamicaSobria(doc, cursor, secao.tabelaItens)
   } else {
-    cursor = garantirEspaco(doc, cursor, 16)
-    doc.setFontSize(9)
-    doc.setFont('helvetica', 'italic')
-    doc.text('Sem itens vinculados', MARGEM, cursor)
-    doc.setFont('helvetica', 'normal')
-    cursor += 20
+    cursor = desenharAvisoSobrio(doc, cursor, 'Sem itens vinculados')
   }
 
   // Trilha de auditoria: quem registrou cada situação e quando.
   if (secao.tabelaHistorico.linhas.length) {
-    cursor = desenharTitulo(doc, cursor, 'Histórico', 13)
-    desenharTabelaDinamica(doc, cursor, secao.tabelaHistorico)
+    cursor = desenharSecaoSobria(doc, cursor, 'Histórico')
+    desenharTabelaDinamicaSobria(doc, cursor, secao.tabelaHistorico)
   }
+  adicionarRodapePaginas(doc, secao.titulo)
   return doc.output('blob')
+}
+
+// --- Estilo sóbrio do relatório da solicitação de fornecimento -------------
+// Pensado pra leitura/conferência de auditoria: paleta neutra (cinzas), linhas
+// finas, hierarquia título > seção > tabela, cabeçalho de tabela repetido a
+// cada página, linhas que não se partem entre páginas e rodapé com paginação.
+// Só apresentação — nenhum dado é alterado. Os demais relatórios seguem com
+// o estilo padrão acima.
+const COR_TEXTO = [34, 34, 34]
+const COR_TEXTO_SUAVE = [100, 100, 100]
+const COR_LINHA = [200, 200, 200]
+const COR_FUNDO_ROTULO = [243, 243, 243]
+const COR_FUNDO_CABECALHO = [229, 229, 229]
+const COR_FUNDO_ZEBRA = [249, 249, 249]
+const ESTILO_CELULA = {
+  font: 'helvetica',
+  textColor: COR_TEXTO,
+  lineColor: COR_LINHA,
+  lineWidth: 0.5,
+  valign: 'top',
+  overflow: 'linebreak',
+}
+
+function novoDocumentoSobrio(titulo) {
+  const jsPDF = obterJsPDF()
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+  const largura = doc.internal.pageSize.getWidth()
+  let cursor = MARGEM
+
+  doc.setTextColor(...COR_TEXTO)
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(15)
+  doc.text(titulo, MARGEM, cursor)
+  cursor += 16
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(9)
+  doc.setTextColor(...COR_TEXTO_SUAVE)
+  doc.text(SUBTITULO_PADRAO, MARGEM, cursor)
+  cursor += 8
+  doc.setDrawColor(...COR_TEXTO_SUAVE)
+  doc.setLineWidth(0.8)
+  doc.line(MARGEM, cursor, largura - MARGEM, cursor)
+  doc.setTextColor(...COR_TEXTO)
+  return { doc, cursor: cursor + 16 }
+}
+
+function desenharSecaoSobria(doc, cursor, texto) {
+  // Título + ao menos o cabeçalho e uma linha da tabela juntos, pra não ficar
+  // órfão no fim da página.
+  cursor = garantirEspaco(doc, cursor, 60)
+  const largura = doc.internal.pageSize.getWidth()
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(11)
+  doc.setTextColor(...COR_TEXTO)
+  doc.text(texto, MARGEM, cursor)
+  doc.setDrawColor(...COR_LINHA)
+  doc.setLineWidth(0.5)
+  doc.line(MARGEM, cursor + 4, largura - MARGEM, cursor + 4)
+  doc.setFont('helvetica', 'normal')
+  return cursor + 12
+}
+
+function desenharAvisoSobrio(doc, cursor, texto) {
+  cursor = garantirEspaco(doc, cursor, 20)
+  doc.setFont('helvetica', 'italic')
+  doc.setFontSize(9)
+  doc.setTextColor(...COR_TEXTO_SUAVE)
+  doc.text(texto, MARGEM, cursor + 8)
+  doc.setFont('helvetica', 'normal')
+  doc.setTextColor(...COR_TEXTO)
+  return cursor + 28
+}
+
+function desenharTabelaCamposSobria(doc, cursor, campos) {
+  doc.autoTable({
+    startY: cursor,
+    margin: { left: MARGEM, right: MARGEM, bottom: MARGEM + 10 },
+    theme: 'grid',
+    styles: { ...ESTILO_CELULA, fontSize: 9, cellPadding: { top: 4, bottom: 4, left: 6, right: 6 } },
+    columnStyles: {
+      0: { fontStyle: 'bold', cellWidth: 150, fillColor: COR_FUNDO_ROTULO },
+    },
+    rowPageBreak: 'avoid',
+    // 0 é valor de verdade, não "sem dado".
+    body: campos.map((c) => [c.label, c.valor === 0 ? '0' : c.valor || '—']),
+  })
+  return doc.lastAutoTable.finalY + 18
+}
+
+// Colunas em que todo valor preenchido parece número/moeda ficam alinhadas à
+// direita, pra facilitar a comparação entre linhas.
+const PADRAO_NUMERICO = /^(R\$\s*)?-?\d{1,3}(\.\d{3})*(,\d+)?%?$|^(R\$\s*)?-?\d+(,\d+)?%?$/
+
+function colunasNumericas(colunas, linhas) {
+  return colunas.map((_, i) => {
+    const valores = linhas.map((l) => l[i]).filter((v) => v !== undefined && v !== null && v !== '')
+    return valores.length > 0 && valores.every((v) => PADRAO_NUMERICO.test(String(v).trim()))
+  })
+}
+
+function desenharTabelaDinamicaSobria(doc, cursor, { colunas, linhas }) {
+  const numericas = colunasNumericas(colunas, linhas)
+  const columnStyles = {}
+  numericas.forEach((ehNumerica, i) => {
+    if (ehNumerica) columnStyles[i] = { halign: 'right' }
+  })
+  doc.autoTable({
+    startY: cursor,
+    margin: { left: MARGEM, right: MARGEM, bottom: MARGEM + 10 },
+    theme: 'grid',
+    styles: { ...ESTILO_CELULA, fontSize: 8, cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 } },
+    headStyles: {
+      fillColor: COR_FUNDO_CABECALHO,
+      textColor: COR_TEXTO,
+      fontStyle: 'bold',
+      halign: 'left',
+    },
+    alternateRowStyles: { fillColor: COR_FUNDO_ZEBRA },
+    columnStyles,
+    rowPageBreak: 'avoid',
+    showHead: 'everyPage',
+    head: [colunas],
+    body: linhas.map((linha) => linha.map((v) => v || '—')),
+  })
+  return doc.lastAutoTable.finalY + 18
+}
+
+// Rodapé em todas as páginas: identificação do documento e "Página X de Y".
+// Roda no fim, quando o total de páginas já é conhecido.
+function adicionarRodapePaginas(doc, titulo) {
+  const total = doc.getNumberOfPages()
+  const { width, height } = doc.internal.pageSize
+  for (let pagina = 1; pagina <= total; pagina++) {
+    doc.setPage(pagina)
+    doc.setDrawColor(...COR_LINHA)
+    doc.setLineWidth(0.5)
+    doc.line(MARGEM, height - 32, width - MARGEM, height - 32)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    doc.setTextColor(...COR_TEXTO_SUAVE)
+    doc.text(`${SUBTITULO_PADRAO} — ${titulo}`, MARGEM, height - 20)
+    doc.text(`Página ${pagina} de ${total}`, width - MARGEM, height - 20, { align: 'right' })
+  }
+  doc.setTextColor(...COR_TEXTO)
 }
 
 // PDF de UMA interação contábil (todos os campos que a API devolveu) —
