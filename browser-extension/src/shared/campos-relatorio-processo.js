@@ -205,6 +205,23 @@ export function montarCamposProcesso(p) {
     { label: 'Valor total dos itens (R$)', valor: formatarValor(p.valorTotalItens) },
     { label: 'Quantidade de itens', valor: p.quantidadeItens ?? subrecurso(p, 'itens').length },
   ]
+  // Tela "Forma de contratação" do processo: tipo, fundamento legal, registro
+  // de preço, autoridade competente, comissão e data da autorização, que o
+  // relatório só trazia como o número da contratação. Só entram os que vierem
+  // preenchidos (nomes dos campos vistos no objeto `contratacao`, 2026-10-29).
+  const formaContratacao = [
+    ['Forma de contratação (tipo)', contratacao.formaContratacaoDesc || contratacao.formaContratacao],
+    ['Fundamento legal', contratacao.fundamentacaoLegal],
+    ['Registro de preço', contratacao.registroPreco],
+    ['Modo de disputa', contratacao.modoDisputa],
+    ['Número da chamada pública', contratacao.numeroChamadaPublica],
+    ['Autoridade competente', contratacao.responsavel],
+    ['Comissão responsável', contratacao.membroComissao],
+    ['Data da autorização', contratacao.dataAutorizacaoAdesaoAtaRegPreco],
+  ]
+    .filter(([, valor]) => valor != null && valor !== '')
+    .map(([label, valor]) => ({ label, valor: typeof valor === 'boolean' ? (valor ? 'Sim' : 'Não') : valorProcesso('campo', valor, p) }))
+  principais.push(...formaContratacao)
   // Demais campos que a API devolveu (pedido do usuário no Contratos: "todas
   // as informações") — depois dos principais, na ordem em que vierem.
   const demais = Object.entries(p)
