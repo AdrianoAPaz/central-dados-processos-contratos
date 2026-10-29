@@ -10,6 +10,9 @@ import {
   montarSecoesAditivos,
   montarSecoesApostilamentos,
   montarSecoesRescisoes,
+  montarSecoesSuspensoes,
+  montarSecoesOutrasAlteracoes,
+  montarDocumentoDespesas,
   montarTabelaItens,
   montarTabelaResponsaveis,
   montarSecoesSolicitacoesFornecimento,
@@ -20,6 +23,7 @@ import {
   tituloContrato,
   MENSAGEM_SEM_RESPONSAVEIS,
   MENSAGEM_SEM_TEXTOS,
+  MENSAGEM_SEM_DESPESAS,
 } from './campos-relatorio.js'
 
 const MARGEM = 40
@@ -245,6 +249,25 @@ export function gerarPdfPublicacoes(documento) {
   return doc.output('blob')
 }
 
+// PDF "despesas contrato X" — um bloco por despesa vinculada com todos os
+// campos, ou o aviso de que não há nenhuma. `documento` é o retorno de
+// montarDocumentoDespesas.
+export function gerarPdfDespesas(documento) {
+  const { doc, cursor: inicioDoc } = novoDocumento(documento.titulo)
+  let cursor = inicioDoc
+  if (!documento.blocos.length) {
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'italic')
+    doc.text(MENSAGEM_SEM_DESPESAS, MARGEM, cursor)
+    doc.setFont('helvetica', 'normal')
+  }
+  for (const bloco of documento.blocos) {
+    cursor = desenharTitulo(doc, cursor, bloco.titulo, 12)
+    cursor = desenharTabelaCampos(doc, cursor, bloco.campos)
+  }
+  return doc.output('blob')
+}
+
 // PDF "textos contrato X" — um bloco por texto da rotina "Textos" com todos
 // os campos, ou o aviso de que não há nenhum. `documento` é o retorno de
 // montarDocumentoTextos.
@@ -300,6 +323,15 @@ export function listarDocumentosRelatorio(contrato) {
     documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfApostilamento(secao) })
   }
 
+  // Suspensões contratuais e alterações de tipo desconhecido: mesma estrutura
+  // do apostilamento (nenhuma alteração contratual pode ficar de fora).
+  for (const secao of montarSecoesSuspensoes(contrato.suspensoes)) {
+    documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfApostilamento(secao) })
+  }
+  for (const secao of montarSecoesOutrasAlteracoes(contrato.outrasAlteracoes)) {
+    documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfApostilamento(secao) })
+  }
+
   for (const secao of montarSecoesSolicitacoesFornecimento(contrato.solicitacoesFornecimento)) {
     documentos.push({ nome: `${slug(secao.titulo)}.pdf`, gerar: () => gerarPdfSolicitacaoFornecimento(secao) })
   }
@@ -315,6 +347,10 @@ export function listarDocumentosRelatorio(contrato) {
   // Sempre gerado, mesmo sem publicação (pedido do usuário: um por contratação).
   const publicacoes = montarDocumentoPublicacoes(contrato)
   documentos.push({ nome: `${slug(publicacoes.titulo)}.pdf`, gerar: () => gerarPdfPublicacoes(publicacoes) })
+
+  // Sempre gerado, mesmo sem despesas (aí sai com o aviso), como as publicações.
+  const despesas = montarDocumentoDespesas(contrato)
+  documentos.push({ nome: `${slug(despesas.titulo)}.pdf`, gerar: () => gerarPdfDespesas(despesas) })
 
   // Sempre gerado, mesmo sem textos (pedido do usuário: um por contratação).
   const textos = montarDocumentoTextos(contrato)

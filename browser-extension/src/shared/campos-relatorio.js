@@ -100,10 +100,28 @@ export function montarCamposRelatorio(c) {
     { label: 'Valor original (R$)', valor: formatarValor(c.valorOriginal) },
     { label: 'Valor de aditivos (R$)', valor: formatarValor(c.valorAditivos) },
     { label: 'Valor de solicitações de fornecimento (R$)', valor: formatarValor(c.valorSolFornec) },
+    ...camposResumoValores(c.resumo),
     { label: 'Quantidade de itens', valor: Array.isArray(c.itens) ? c.itens.length : 0 },
     { label: 'Quantidade de aditivos', valor: Array.isArray(c.aditivos) ? c.aditivos.length : 0 },
     { label: 'Quantidade de apostilamentos', valor: Array.isArray(c.apostilamentos) ? c.apostilamentos.length : 0 },
     { label: 'Quantidade de rescisões', valor: Array.isArray(c.rescisoes) ? c.rescisoes.length : 0 },
+    { label: 'Quantidade de suspensões', valor: Array.isArray(c.suspensoes) ? c.suspensoes.length : 0 },
+  ]
+}
+
+// "Resumo dos valores do contrato" da tela (contratacoes/{id}/resumo, buscado
+// por popup.js): acréscimos, supressões, reajustes, total, executado e saldo.
+// Sem o resumo (busca falhou, ou contrato salvo antes desta versão), nada é
+// impresso — melhor que mostrar zeros inventados.
+function camposResumoValores(resumo) {
+  if (!resumo || typeof resumo !== 'object') return []
+  return [
+    { label: 'Valor de acréscimos (R$)', valor: formatarValor(resumo.valorAcrescimos) },
+    { label: 'Valor de supressões (R$)', valor: formatarValor(resumo.valorSupressoes) },
+    { label: 'Valor de reajustes (R$)', valor: formatarValor(resumo.valorReajustes) },
+    { label: 'Valor total do contrato (R$)', valor: formatarValor(resumo.valorTotalContrato) },
+    { label: 'Valor executado (R$)', valor: formatarValor(resumo.valorExecutado) },
+    { label: 'Saldo do contrato (R$)', valor: formatarValor(resumo.saldoContrato) },
   ]
 }
 
@@ -135,7 +153,14 @@ const CAMPOS_ITEM = [
     chaves: ['unidade', 'unidade_medida', 'undMedida'],
     extrair: extrairUnidade,
   },
+  // Marca e Lote são colunas da tela "Listando itens do contrato" que só saem
+  // quando algum item traz valor (os nomes `marca`/`lote` são palpite, não
+  // confirmados ao vivo — o item do contrato 185/2026 não trazia nenhum dos
+  // dois). Saldo (QTD) é `saldoItemContrato`, confirmado ao vivo (2026-10-29).
+  { header: 'Marca', chaves: ['marca'], opcional: true },
+  { header: 'Lote', chaves: ['lote'], opcional: true },
   { header: 'Quantidade', chaves: ['qtdItem', 'quantidade', 'qtde', 'qtd'] },
+  { header: 'Saldo (QTD)', chaves: ['saldoItemContrato'], opcional: true },
   {
     header: 'Valor unitário (R$)',
     // `vlUnitario` confirmado ao vivo pelo usuário (2026-09-17, item de
@@ -165,14 +190,17 @@ function extrairCampoItem(raw, campo) {
 // — usada pros itens do contrato e de cada aditivo.
 export function montarTabelaItens(registros) {
   if (!Array.isArray(registros) || !registros.length) return { colunas: [], linhas: [] }
+  const linhas = registros.map((raw) =>
+    CAMPOS_ITEM.map((c) => {
+      const bruto = extrairCampoItem(raw, c)
+      return c.moeda ? formatarValor(bruto) : valorTexto(bruto)
+    }),
+  )
+  // Coluna opcional (Marca, Lote, Saldo) só aparece se algum item tiver valor.
+  const mantidas = CAMPOS_ITEM.map((c, i) => !c.opcional || linhas.some((linha) => linha[i] !== ''))
   return {
-    colunas: CAMPOS_ITEM.map((c) => c.header),
-    linhas: registros.map((raw) =>
-      CAMPOS_ITEM.map((c) => {
-        const bruto = extrairCampoItem(raw, c)
-        return c.moeda ? formatarValor(bruto) : valorTexto(bruto)
-      }),
-    ),
+    colunas: CAMPOS_ITEM.filter((_, i) => mantidas[i]).map((c) => c.header),
+    linhas: linhas.map((linha) => linha.filter((_, i) => mantidas[i])),
   }
 }
 
@@ -206,6 +234,19 @@ export function montarSecoesApostilamentos(apostilamentos) {
 // "rescisão 1".
 export function montarSecoesRescisoes(rescisoes) {
   return montarSecoesAlteracao(rescisoes, 'rescisão')
+}
+
+// Suspensões contratuais — o tipo "Suspensões" da tela Alterações contratuais
+// (conferido no Betha em 2026-10-29; antes eram descartadas). Mesma estrutura
+// do apostilamento; título "suspensão 1".
+export function montarSecoesSuspensoes(suspensoes) {
+  return montarSecoesAlteracao(suspensoes, 'suspensão')
+}
+
+// Alterações de um tipo que a Central ainda não conhece: saem com o JSON
+// completo em vez de serem descartadas em silêncio.
+export function montarSecoesOutrasAlteracoes(outras) {
+  return montarSecoesAlteracao(outras, 'alteração')
 }
 
 function montarSecoesAlteracao(registros, rotulo) {
@@ -359,6 +400,27 @@ export function montarDocumentoPublicacoes(c) {
     titulo: tituloPublicacoes(c),
     blocos: publicacoes.map((raw, index) => ({
       titulo: `publicação ${index + 1}`,
+      campos: camposDinamicos(raw, raw),
+    })),
+  }
+}
+
+// Documento "despesas contrato 12/2026" — as despesas vinculadas ao contrato
+// (tela "Despesas" do Betha, contratacoes/{id}/despesas), um bloco por
+// despesa com TODOS os campos que a API devolveu. Gerado sempre, um por
+// contratação, mesmo sem despesas (aí `blocos` vem vazio e o documento avisa).
+export const MENSAGEM_SEM_DESPESAS = 'Sem despesas vinculadas'
+
+export function tituloDespesas(c) {
+  return `despesas ${tituloContrato(c)}`
+}
+
+export function montarDocumentoDespesas(c) {
+  const despesas = Array.isArray(c.despesas) ? c.despesas : []
+  return {
+    titulo: tituloDespesas(c),
+    blocos: despesas.map((raw, index) => ({
+      titulo: `despesa ${(raw && raw.numero) ?? index + 1}`,
       campos: camposDinamicos(raw, raw),
     })),
   }

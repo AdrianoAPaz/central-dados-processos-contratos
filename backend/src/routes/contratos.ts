@@ -367,6 +367,17 @@ function quantidadeDeDias(c: ContratoRelatorio): number | null {
   return Math.round((c.dataFimVigencia.getTime() - c.dataInicioVigencia.getTime()) / 86400000);
 }
 
+// "Resumo dos valores do contrato" (contratacoes/{id}/resumo, guardado em
+// `dadosBrutos.resumo` pela extensão). Sem o resumo, as células ficam vazias.
+const CAMPOS_RESUMO_VALORES: Array<[string, string]> = [
+  ['Valor de acréscimos (R$)', 'valorAcrescimos'],
+  ['Valor de supressões (R$)', 'valorSupressoes'],
+  ['Valor de reajustes (R$)', 'valorReajustes'],
+  ['Valor total do contrato (R$)', 'valorTotalContrato'],
+  ['Valor executado (R$)', 'valorExecutado'],
+  ['Saldo do contrato (R$)', 'saldoContrato'],
+];
+
 const CAMPOS_RELATORIO: Array<{ label: string; valor: (c: ContratoRelatorio) => string | number | null }> = [
   { label: 'Sequencial', valor: (c) => c.sequencial },
   { label: 'Número/Ano', valor: (c) => c.numeroFormatado },
@@ -411,6 +422,13 @@ const CAMPOS_RELATORIO: Array<{ label: string; valor: (c: ContratoRelatorio) => 
   { label: 'Valor original (R$)', valor: (c) => (c.valorOriginal != null ? Number(c.valorOriginal) : null) },
   { label: 'Valor de aditivos (R$)', valor: (c) => (c.valorAditivos != null ? Number(c.valorAditivos) : null) },
   { label: 'Valor de solicitações de fornecimento (R$)', valor: (c) => (c.valorSolFornec != null ? Number(c.valorSolFornec) : null) },
+  ...CAMPOS_RESUMO_VALORES.map(([label, chave]) => ({
+    label,
+    valor: (c: ContratoRelatorio) => {
+      const v = obj(obj(c.dadosBrutos).resumo)[chave];
+      return v != null && !Number.isNaN(Number(v)) ? Number(v) : null;
+    },
+  })),
   { label: 'Quantidade de itens', valor: (c) => c.itens.length },
   { label: 'Quantidade de aditivos', valor: (c) => c.aditivos.length },
   { label: 'Quantidade de apostilamentos', valor: (c) => c.apostilamentos.length },

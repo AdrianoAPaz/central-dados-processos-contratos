@@ -106,6 +106,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  // "Resumo dos valores do contrato" da tela: GET contratacoes/{id}/resumo
+  // (objeto único, não paginado; confirmado ao vivo em 2026-10-29) — valor do
+  // contrato, executado, reajustes, supressões, acréscimos, saldo e total.
+  if (message.type === 'buscar-resumo-valores') {
+    buscarItemDeSubrecurso(`${ENDPOINT_CONTRATACOES}/${limparId(message.id)}/resumo`)
+      .then((resumo) => sendResponse({ resumo }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
+  // Despesas vinculadas ao contrato (tela "Despesas"): GET
+  // contratacoes/{id}/despesas, paginado (confirmado ao vivo, 2026-10-29, com
+  // lista vazia — o formato dos registros ainda não foi visto).
+  if (message.type === 'buscar-despesas') {
+    buscarSubrecurso(`${ENDPOINT_CONTRATACOES}/${limparId(message.id)}/despesas`)
+      .then((despesas) => sendResponse({ despesas }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
   if (message.type === 'buscar-itens') {
     buscarSubrecurso(`${ENDPOINT_CONTRATACOES}/${limparId(message.id)}/itens`)
       .then((itens) => sendResponse({ itens }))

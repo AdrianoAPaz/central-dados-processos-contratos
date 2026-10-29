@@ -3,14 +3,18 @@ import {
   montarSecoesAditivos,
   montarSecoesApostilamentos,
   montarSecoesRescisoes,
+  montarSecoesSuspensoes,
+  montarSecoesOutrasAlteracoes,
   montarTabelaItens,
   montarTabelaResponsaveis,
   montarSecoesSolicitacoesFornecimento,
   montarSecoesInteracoesContabilidade,
   montarSecoesRecebimentos,
   montarDocumentoPublicacoes,
+  montarDocumentoDespesas,
   montarDocumentoTextos,
   MENSAGEM_SEM_RESPONSAVEIS,
+  MENSAGEM_SEM_DESPESAS,
   MENSAGEM_SEM_TEXTOS,
 } from '../shared/campos-relatorio.js'
 import { criarZip } from '../shared/zip.js'
@@ -131,6 +135,8 @@ async function carregar() {
   const alteracoesSemItens = [
     { id: 'apostilamentos', rotulo: 'Apostilamentos', secoes: montarSecoesApostilamentos(contrato.apostilamentos) },
     { id: 'rescisoes', rotulo: 'Rescisões', secoes: montarSecoesRescisoes(contrato.rescisoes) },
+    { id: 'suspensoes', rotulo: 'Suspensões', secoes: montarSecoesSuspensoes(contrato.suspensoes) },
+    { id: 'outrasAlteracoes', rotulo: 'Outras alterações', secoes: montarSecoesOutrasAlteracoes(contrato.outrasAlteracoes) },
   ]
   for (const { id, rotulo, secoes } of alteracoesSemItens) {
     if (!secoes.length) continue
@@ -281,6 +287,30 @@ async function carregar() {
     div.appendChild(h3)
     div.appendChild(criarTabelaCampos(bloco.campos))
     containerPublicacoes.appendChild(div)
+  }
+
+  // Despesas vinculadas ao contrato — mesmo conteúdo do documento "despesas
+  // contrato X"; a seção aparece sempre, com o aviso quando não há nenhuma.
+  const documentoDespesas = montarDocumentoDespesas(contrato)
+  const containerDespesas = document.getElementById('despesas')
+  const tituloDespesas = document.createElement('h2')
+  tituloDespesas.textContent = `Despesas (${documentoDespesas.blocos.length})`
+  containerDespesas.appendChild(tituloDespesas)
+
+  if (!documentoDespesas.blocos.length) {
+    const semDespesas = document.createElement('p')
+    semDespesas.className = 'sem-itens'
+    semDespesas.textContent = MENSAGEM_SEM_DESPESAS
+    containerDespesas.appendChild(semDespesas)
+  }
+  for (const bloco of documentoDespesas.blocos) {
+    const div = document.createElement('div')
+    div.className = 'aditivo-secao'
+    const h3 = document.createElement('h3')
+    h3.textContent = bloco.titulo
+    div.appendChild(h3)
+    div.appendChild(criarTabelaCampos(bloco.campos))
+    containerDespesas.appendChild(div)
   }
 
   // Textos do contrato (rotina "Textos") — mesmo conteúdo do documento

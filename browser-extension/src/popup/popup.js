@@ -350,18 +350,26 @@ function separarAlteracoes(alteracoes, aditivosConhecidos) {
   const idsConhecidos = new Set(aditivosConhecidos.map((a) => String(a && a.id)))
   const apostilamentos = []
   const rescisoes = []
+  const suspensoes = []
+  const outrasAlteracoes = []
   const aditivosExtras = []
   for (const alteracao of alteracoes) {
     if (!alteracao || typeof alteracao !== 'object') continue
     const tipo = tipoDaAlteracao(alteracao)
     if (tipo === 'APOSTILAMENTO') apostilamentos.push(achatarAlteracao(alteracao))
     else if (tipo.startsWith('RESCIS')) rescisoes.push(achatarAlteracao(alteracao))
+    // A tela Alterações contratuais tem o tipo "Suspensões" (conferido em
+    // 2026-10-29); o valor exato de `tipoAlteracao` não foi confirmado.
+    else if (tipo.startsWith('SUSPENS')) suspensoes.push(achatarAlteracao(alteracao))
     else if (tipo === 'ADITIVO') {
       const aditivo = achatarAlteracao(alteracao)
       if (!idsConhecidos.has(String(aditivo.id ?? alteracao.idAlteracao))) aditivosExtras.push(aditivo)
+    } else {
+      // Tipo desconhecido: vai pro relatório com o JSON completo, não é descartado.
+      outrasAlteracoes.push(achatarAlteracao(alteracao))
     }
   }
-  return { apostilamentos, rescisoes, aditivosExtras }
+  return { apostilamentos, rescisoes, suspensoes, outrasAlteracoes, aditivosExtras }
 }
 
 async function comDetalhes(contrato) {
@@ -377,6 +385,8 @@ async function comDetalhes(contrato) {
     respPublicacoes,
     respResponsaveis,
     respInteracoes,
+    respResumo,
+    respDespesas,
   ] =
     await Promise.all([
       chrome.runtime.sendMessage({ type: 'buscar-aditivos', id: contrato.id }),
@@ -388,6 +398,8 @@ async function comDetalhes(contrato) {
       chrome.runtime.sendMessage({ type: 'buscar-publicacoes', id: contrato.id }),
       chrome.runtime.sendMessage({ type: 'buscar-responsaveis', id: contrato.id }),
       chrome.runtime.sendMessage({ type: 'buscar-interacoes-contabilidade', id: contrato.id }),
+      chrome.runtime.sendMessage({ type: 'buscar-resumo-valores', id: contrato.id }),
+      chrome.runtime.sendMessage({ type: 'buscar-despesas', id: contrato.id }),
     ])
   if (respAditivos && respAditivos.erro) throw new Error(respAditivos.erro)
   if (respItens && respItens.erro) throw new Error(respItens.erro)
@@ -407,6 +419,8 @@ async function comDetalhes(contrato) {
   const separadas = separarAlteracoes(alteracoes, aditivosDaListagem)
   const apostilamentos = await enriquecerDescricoesCadastros(separadas.apostilamentos)
   const rescisoes = await enriquecerDescricoesCadastros(separadas.rescisoes)
+  const suspensoes = await enriquecerDescricoesCadastros(separadas.suspensoes)
+  const outrasAlteracoes = await enriquecerDescricoesCadastros(separadas.outrasAlteracoes)
 
   const aditivos = await enriquecerDescricoesCadastros([...aditivosDaListagem, ...separadas.aditivosExtras])
   const aditivosComItens = await Promise.all(
@@ -477,6 +491,12 @@ async function comDetalhes(contrato) {
     aditivos: aditivosComItens,
     apostilamentos,
     rescisoes,
+    suspensoes,
+    outrasAlteracoes,
+    // Resumo dos valores e despesas vinculadas: best-effort (um erro aqui não
+    // trava o relatório; sem o resumo, os campos dele simplesmente não saem).
+    resumo: (respResumo && !respResumo.erro && respResumo.resumo) || null,
+    despesas: (respDespesas && !respDespesas.erro && respDespesas.despesas) || [],
     solicitacoesFornecimento: solicitacoesComRecebimentos,
     anexosTextos: respAnexosTextos.anexos || [],
     // Registros da rotina "Textos" — documento "textos contrato X".
