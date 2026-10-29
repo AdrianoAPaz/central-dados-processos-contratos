@@ -26,11 +26,22 @@ export function coletarAnexosContrato(contrato) {
   const doAditivos = deAlteracao(contrato.aditivos, 'Aditivo')
   const doApostilamentos = deAlteracao(contrato.apostilamentos, 'Apostilamento')
   const dasRescisoes = deAlteracao(contrato.rescisoes, 'Rescisão')
+  const dasSuspensoes = deAlteracao(contrato.suspensoes, 'Suspensão')
+  const dasOutras = deAlteracao(contrato.outrasAlteracoes, 'Alteração')
   // Documentos das janelas "Textos" e "Publicação" do contrato — buscados à
   // parte (não vêm no campo inline `arquivos`, ver service-worker.js).
   const doTextos = (Array.isArray(contrato.anexosTextos) ? contrato.anexosTextos : []).map((a) => ({ ...a, origem: 'Textos' }))
   const daPublicacao = (Array.isArray(contrato.anexosPublicacao) ? contrato.anexosPublicacao : []).map((a) => ({ ...a, origem: 'Publicação' }))
-  return [...doContrato, ...doAditivos, ...doApostilamentos, ...dasRescisoes, ...doTextos, ...daPublicacao].filter(
+  return [
+    ...doContrato,
+    ...doAditivos,
+    ...doApostilamentos,
+    ...dasRescisoes,
+    ...dasSuspensoes,
+    ...dasOutras,
+    ...doTextos,
+    ...daPublicacao,
+  ].filter(
     (a) => a && a.id,
   )
 }
