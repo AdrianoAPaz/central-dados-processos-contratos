@@ -31,6 +31,11 @@ import {
 // `p` é o processo dono do registro (pra resolver as referências a ele e as
 // entidades só com id).
 function valorProcesso(chave, valor, p) {
+  // A tela mostra data e hora dos registros (ex.: parecer "26/10/2026
+  // 10:46:37"); o formato padrão do relatório cortaria a hora. Lê os números
+  // da própria string, sem converter fuso. Meia-noite fica só com a data.
+  const dataHora = typeof valor === 'string' && valor.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)/)
+  if (dataHora && !/^00:00(:00)?$/.test(dataHora[4]) && !/(Z|[+-]\d{2}:?\d{2})$/i.test(valor)) return `${dataHora[3]}/${dataHora[2]}/${dataHora[1]} ${dataHora[4]}`
   if (valor && typeof valor === 'object' && !Array.isArray(valor)) {
     if (valor.simbolo != null) return String(valor.simbolo)
     const especifico = valorObjetoProcesso(chave, valor, p)
