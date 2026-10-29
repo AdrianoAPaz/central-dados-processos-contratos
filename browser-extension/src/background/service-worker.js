@@ -1052,11 +1052,22 @@ async function buscarPropostasParticipantes(sessao, processoId, participantes) {
   const propostas = []
   for (const participante of participantes) {
     if (!participante || participante.id == null) continue
-    const registros = await buscarSubrecursoProcesso(
-      sessao,
-      processoId,
-      `participantes/${limparId(participante.id)}/propostas`,
-    )
+    // A tela do processo lê `participantes/{id}/propostas/itens` (valor unitário
+    // e total de cada item, confirmado no código da página em 2026-10-29); o
+    // `propostas` puro não devolvia nada no processo 246/2026 (participante com
+    // "Possui proposta" = true e relatório "Nenhuma proposta encontrada").
+    const registros = []
+    for (const sufixo of ['propostas/itens', 'propostas']) {
+      const encontrados = await buscarSubrecursoProcesso(
+        sessao,
+        processoId,
+        `participantes/${limparId(participante.id)}/${sufixo}`,
+      )
+      if (encontrados.length) {
+        registros.push(...encontrados)
+        break
+      }
+    }
     for (const proposta of registros) {
       propostas.push({ ...proposta, participanteId: participante.id, participanteNome: nomeParticipante(participante) })
     }

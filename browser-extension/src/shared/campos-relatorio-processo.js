@@ -259,8 +259,12 @@ export function montarTabelaGenerica(registros, excluir = [], p = null) {
   }
 
   const preferidas = COLUNAS_PREFERIDAS.filter((c) => presentes.includes(c))
-  const restantes = presentes.filter((c) => !preferidas.includes(c))
-  const ordenadas = [...preferidas, ...restantes]
+  // Depois das preferidas, o que a tela de itens mostra (unidade, valores,
+  // situação) vem antes dos campos técnicos, que no processo 246/2026 tomaram
+  // as 8 colunas e deixaram valor unitário/total de fora.
+  const daTela = presentes.filter((c) => !preferidas.includes(c) && /^(unidade|valor|vl|preco|total|situacao)/i.test(c))
+  const restantes = presentes.filter((c) => !preferidas.includes(c) && !daTela.includes(c))
+  const ordenadas = [...preferidas, ...daTela, ...restantes]
   const escolhidas = ordenadas.slice(0, MAX_COLUNAS_TABELA)
 
   return {
