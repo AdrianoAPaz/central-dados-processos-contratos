@@ -4,6 +4,7 @@
 // sessão do Compras), agrupando tudo num único .zip.
 import {
   PASTA_ATAS_REGISTRO_PRECO,
+  PASTA_PARTICIPANTES,
   SUBRECURSOS_EM_TABELA,
   ehRegistroPreco,
   montarAtasRegistroPreco,
@@ -14,7 +15,12 @@ import {
   subrecurso,
 } from '../shared/campos-relatorio-processo.js'
 import { criarZip } from '../shared/zip.js'
-import { listarDocumentosAta, listarDocumentosProcesso, listarDocumentosSemAtas } from '../shared/pdf-relatorio-processo.js'
+import {
+  listarDocumentosAta,
+  listarDocumentosParticipantes,
+  listarDocumentosProcesso,
+  listarDocumentosSemAtas,
+} from '../shared/pdf-relatorio-processo.js'
 import { criarTabelaCampos, criarTabelaDinamica } from '../shared/dom-relatorio.js'
 import { listarDocumentosRelatorio } from '../shared/pdf-relatorio.js'
 import { baixarBlob, coletarArquivosPacote, nomeUnicoNoZip } from '../shared/pacote.js'
@@ -66,6 +72,20 @@ async function montarPacoteRelatorio(processo, anexos, container) {
     sistema: 'compras',
     lista,
   })
+
+  // Participantes: pasta "Participantes" junto dos arquivos do processo, com um
+  // PDF por participante (dados + propostas dele).
+  const documentosParticipantes = listarDocumentosParticipantes(processo)
+  if (documentosParticipantes.length) {
+    baixados.push(
+      ...(await coletarArquivosPacote({
+        documentos: documentosParticipantes,
+        anexos: [],
+        prefixo: `${prefixoProcesso}${PASTA_PARTICIPANTES}/`,
+        lista,
+      })),
+    )
+  }
 
   // Processo habilitado como registro de preço: pasta "Atas de Registro de
   // Preço" na raiz do zip, ao lado de "Contratações", com uma subpasta por ata

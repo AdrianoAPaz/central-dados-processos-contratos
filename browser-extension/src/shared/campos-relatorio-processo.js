@@ -258,15 +258,30 @@ function nomeParticipante(raw) {
 // de `subrecursos.propostas`, marcadas com `participanteId` pelo service worker
 // (ver buscarPropostasParticipantes). Devolve null sem participantes.
 export function montarDocumentoParticipantes(p) {
-  const participantes = subrecurso(p, 'participantes')
-  if (!participantes.length) return null
+  const documentos = montarDocumentosParticipantesIndividuais(p)
+  if (!documentos.length) return null
+  return {
+    chave: 'participantes',
+    titulo: `participantes do ${tituloProcesso(p)}`,
+    blocos: documentos.flatMap((documento) => documento.blocos),
+  }
+}
 
+// Pasta própria no zip do processo (pedido do usuário, 2026-10-29): um PDF
+// por participante, agrupados em "Participantes".
+export const PASTA_PARTICIPANTES = 'Participantes'
+
+// Um documento por participante: o bloco dele (todos os campos) seguido de um
+// bloco por proposta dele. Vazio sem participantes.
+export function montarDocumentosParticipantesIndividuais(p) {
+  const participantes = subrecurso(p, 'participantes')
   const propostas = subrecurso(p, 'propostas')
-  const blocos = []
-  participantes.forEach((raw, index) => {
+  const base = tituloProcesso(p)
+
+  return participantes.map((raw, index) => {
     const nome = nomeParticipante(raw)
     const rotulo = nome ? `participante ${index + 1} — ${nome}` : `participante ${index + 1}`
-    blocos.push({ titulo: rotulo, campos: camposDe(raw, p) })
+    const blocos = [{ titulo: rotulo, campos: camposDe(raw, p) }]
 
     const dele = propostas.filter((proposta) => raw && proposta.participanteId === raw.id)
     if (!dele.length) {
@@ -279,9 +294,9 @@ export function montarDocumentoParticipantes(p) {
         campos: camposDe(proposta, p, ['participanteId', 'participanteNome']),
       })
     })
-  })
 
-  return { chave: 'participantes', titulo: `participantes do ${tituloProcesso(p)}`, blocos }
+    return { chave: 'participante', titulo: `${rotulo} do ${base}`, blocos }
+  })
 }
 
 // Um documento por sub-recurso em `SUBRECURSOS_EM_DOCUMENTO` que tenha
