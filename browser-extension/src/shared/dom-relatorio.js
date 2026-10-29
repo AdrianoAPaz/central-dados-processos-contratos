@@ -7,7 +7,7 @@ export function criarTabelaCampos(campos) {
     const tr = document.createElement('tr')
     tr.innerHTML = `<td class="campo"></td><td class="valor"></td>`
     tr.querySelector('.campo').textContent = label
-    tr.querySelector('.valor').textContent = valor || '—'
+    tr.querySelector('.valor').textContent = valor === 0 ? '0' : valor || '—'
     tabela.appendChild(tr)
   }
   return tabela

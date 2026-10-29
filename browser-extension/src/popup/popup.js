@@ -287,6 +287,18 @@ async function enriquecerVeiculosPublicacao(publicacoes) {
   })
 }
 
+// `fundamentacaoLegal` do contrato vem na listagem só com o id (o resto
+// nulo); o texto da tela ("Lei 14.133/2021, Art. 74, II") está no cadastro
+// `fundamentoslegais/{id}`. Best-effort: se a busca falhar, o campo fica como
+// veio e o relatório monta o que der a partir do próprio registro.
+async function enriquecerFundamentoLegal(contrato) {
+  const fundamento = contrato.fundamentacaoLegal
+  if (!fundamento || fundamento.id == null || fundamento.descricao) return contrato
+  const resp = await chrome.runtime.sendMessage({ type: 'buscar-fundamento-legal', id: fundamento.id })
+  if (!resp || resp.erro || !resp.fundamento) return contrato
+  return { ...contrato, fundamentacaoLegal: { ...fundamento, ...resp.fundamento } }
+}
+
 // Itens da solicitação de fornecimento em ordem crescente do número do item
 // (pedido do usuário, 2026-10-19). Mesmas chaves candidatas da coluna "Nº do
 // item" (CAMPOS_ITEM em campos-relatorio.js). Item sem número vai pro fim,
@@ -498,7 +510,7 @@ async function comDetalhes(contrato) {
   )
 
   return {
-    ...contrato,
+    ...(await enriquecerFundamentoLegal(contrato)),
     itens: respItens.itens || [],
     aditivos: aditivosComItens,
     apostilamentos,

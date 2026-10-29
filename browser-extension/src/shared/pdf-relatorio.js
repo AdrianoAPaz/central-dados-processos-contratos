@@ -64,7 +64,8 @@ export function desenharTabelaCampos(doc, cursor, campos) {
     theme: 'grid',
     styles: { fontSize: 9, cellPadding: 4 },
     columnStyles: { 0: { fontStyle: 'bold', cellWidth: 160 } },
-    body: campos.map((c) => [c.label, c.valor || '—']),
+    // 0 é valor de verdade (ex.: "Quantidade de aditivos"), não "sem dado".
+    body: campos.map((c) => [c.label, c.valor === 0 ? '0' : c.valor || '—']),
   })
   return doc.lastAutoTable.finalY + 12
 }
