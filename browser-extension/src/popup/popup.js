@@ -656,6 +656,80 @@ async function carregarProcessoCompleto(processo) {
   }
 }
 
+// Entidade do processo (Compras) x entidade da contratação (Contratos): os dois
+// sistemas ficam abertos em sessões independentes, então nada impede o usuário
+// de estar numa entidade em um e noutra no outro — e o número do processo se
+// repete entre entidades, o que atrelaria contratações de outra entidade. A
+// comparação usa o que cada registro trouxer, do mais ao menos confiável: CNPJ,
+// nome, id. Sem dado em comum devolve null (não dá pra afirmar nada).
+function textoNormalizado(valor) {
+  return String(valor == null ? '' : valor)
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase()
+}
+
+// `{ id, nome, cnpj }` da entidade de um registro. O Compras costuma trazer só
+// `{ id }` na entidade do processo; o nome aparece em outro ponto do mesmo
+// registro (sob chaves `entidade*`), por isso o índice id -> nome do registro.
+function identificarEntidade(entidade, nomesPorId) {
+  if (!entidade || typeof entidade !== 'object') return null
+  const id = entidade.id != null ? String(entidade.id) : ''
+  const nome = textoNormalizado(entidade.nome || (nomesPorId && nomesPorId.get(id)) || '')
+  const cnpj = String(entidade.cnpj || '').replace(/\D/g, '')
+  return id || nome || cnpj ? { id, nome, cnpj } : null
+}
+
+function indexarNomesDeEntidades(raiz) {
+  const nomes = new Map()
+  const visitar = (no, chave) => {
+    if (Array.isArray(no)) return no.forEach((item) => visitar(item, chave))
+    if (!no || typeof no !== 'object') return
+    if (/^entidade/i.test(chave) && no.id != null && no.nome != null && !nomes.has(String(no.id))) {
+      nomes.set(String(no.id), String(no.nome))
+    }
+    for (const [k, v] of Object.entries(no)) visitar(v, k)
+  }
+  visitar(raiz, '')
+  return nomes
+}
+
+// true = mesma entidade, false = entidades diferentes, null = não comparável.
+function compararEntidades(a, b) {
+  if (!a || !b) return null
+  for (const campo of ['cnpj', 'nome', 'id']) {
+    if (a[campo] && b[campo]) return a[campo] === b[campo]
+  }
+  return null
+}
+
+function rotuloEntidade(e) {
+  return e.nome || e.cnpj || `id ${e.id}`
+}
+
+// Confere se as contratações vinculadas são da mesma entidade do processo.
+// Lança erro na divergência (nada é enviado/gerado); devolve um aviso quando
+// não há como comparar, ou null quando confere.
+function validarMesmaEntidade(processo, contratacoes) {
+  const doProcesso = identificarEntidade(processo.entidade, indexarNomesDeEntidades(processo))
+  let incomparaveis = 0
+  for (const contratacao of contratacoes) {
+    const daContratacao = identificarEntidade(contratacao.entidade, indexarNomesDeEntidades(contratacao))
+    const mesma = compararEntidades(doProcesso, daContratacao)
+    if (mesma === false) {
+      throw new Error(
+        `As entidades não conferem: o processo do Compras é da entidade "${rotuloEntidade(doProcesso)}", ` +
+          `mas a contratação ${rotuloContratacao(contratacao)} do Contratos é da entidade "${rotuloEntidade(daContratacao)}". ` +
+          'Abra o Compras e o Contratos na mesma entidade e busque de novo.',
+      )
+    }
+    if (mesma === null) incomparaveis++
+  }
+  return incomparaveis ? 'não foi possível conferir se a entidade das contratações é a mesma do processo' : null
+}
+
 // Contratações geradas pelo processo (contratos, atas, compras diretas…), cada
 // uma já com todos os detalhes (`comDetalhes`) — só busca se o usuário marcou
 // o checkbox. O vínculo é o `processoAdministrativo` (número + exercício) da
@@ -680,6 +754,9 @@ async function carregarContratacoesVinculadas(processo) {
     avisos.push('a lista de contratações pode estar incompleta (limite de varredura atingido)')
   }
 
+  const avisoEntidade = validarMesmaEntidade(processo, encontradas)
+  if (avisoEntidade) avisos.push(avisoEntidade)
+
   const contratacoes = []
   for (const [i, contratacao] of encontradas.entries()) {
     mostrarMsg(`Buscando os dados da contratação ${i + 1} de ${encontradas.length}…`, 'info')
@@ -696,7 +773,7 @@ async function enviarProcesso(processo, botao) {
   botao.disabled = true
   try {
     const { processoCompleto, avisos } = await carregarProcessoCompleto(processo)
-    const vinculadas = await carregarContratacoesVinculadas(processo)
+    const vinculadas = await carregarContratacoesVinculadas(processoCompleto)
     avisos.push(...vinculadas.avisos)
 
     mostrarMsg('Enviando…', 'info')
@@ -737,7 +814,7 @@ async function gerarPdfProcesso(processo, botao) {
   botao.disabled = true
   try {
     const { processoCompleto, avisos } = await carregarProcessoCompleto(processo)
-    const vinculadas = await carregarContratacoesVinculadas(processo)
+    const vinculadas = await carregarContratacoesVinculadas(processoCompleto)
     avisos.push(...vinculadas.avisos)
 
     // As contratações vão junto do processo, numa aba só: a página monta um
