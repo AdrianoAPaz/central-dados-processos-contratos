@@ -643,12 +643,14 @@ async function carregarProcessoCompleto(processo) {
     type: 'buscar-detalhes-processo',
     id: processo.id,
     arquivos: processo.arquivos,
+    processo,
   })
   if (detalhes && detalhes.erro) throw new Error(detalhes.erro)
   return {
     avisos: detalhes.avisos || [],
     processoCompleto: {
       ...processo,
+      ...(detalhes.processo || {}),
       exercicio: contextoCompras.exercicio,
       entidadeToken: contextoCompras.entidade,
       subrecursos: detalhes.subrecursos,

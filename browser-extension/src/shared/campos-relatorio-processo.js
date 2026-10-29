@@ -52,6 +52,13 @@ function valorObjetoProcesso(chave, valor, p) {
     if (valor.numeroProcesso != null) return String(valor.numeroProcesso)
   }
   if (chave === 'parametroExercicio' && valor.exercicio != null) return String(valor.exercicio)
+  // Cadastros de entrega/pagamento/execução: a tela mostra a descrição. O local
+  // de entrega pode vir sem descrição (só endereço): cai no logradouro. Sem
+  // nenhum texto (cadastro não resolvido) segue o JSON cru, pra análise manual.
+  if (['formaPagamento', 'prazoEntrega', 'localEntrega', 'regimeExecucao'].includes(chave)) {
+    const texto = valor.descricao || valor.nome || valor.logradouro
+    if (texto) return String(texto)
+  }
   // `contratacao` do processo: dados da licitação/contratação direta —
   // modalidade + número sequencial (ex.: "Concorrência eletrônica 4/2026").
   if (chave === 'contratacao' && valor.numeroSequencial != null) {
@@ -155,12 +162,39 @@ const CHAVES_PRINCIPAIS = new Set([
   'subrecursos',
 ])
 
+// Rótulos que a tela do Compras usa (formulário "Editando processo
+// administrativo") para campos cujo nome na API é diferente.
+const ROTULOS_PROCESSO = {
+  formaPagamento: 'Condição de pagamento',
+  prazoEntrega: 'Prazo de entrega',
+  localEntrega: 'Local de entrega',
+  regimeExecucao: 'Regime de execução',
+  formaJulgamento: 'Forma de julgamento',
+  orcamentoSigiloso: 'Orçamento sigiloso',
+  previsaoSubcontratacao: 'Previsão de subcontratação',
+  controleSaldo: 'Controlar saldo por',
+  controleSaldoDesc: 'Controlar saldo por (descrição)',
+}
+
+// Tipo de objeto (tela: "Compras e Serviços"): objeto com descrição ou enum em
+// texto (ex.: COMPRAS_SERVICOS), que vira palavras.
+function descricaoTipoObjeto(tipoObjeto) {
+  if (tipoObjeto == null || tipoObjeto === '') return ''
+  if (typeof tipoObjeto === 'object') {
+    return String(tipoObjeto.tipoDescricao || tipoObjeto.descricao || tipoObjeto.nome || tipoObjeto.tipo || '')
+  }
+  const texto = String(tipoObjeto).replace(/_/g, ' ').toLowerCase()
+  return texto.charAt(0).toUpperCase() + texto.slice(1)
+}
+
 export function montarCamposProcesso(p) {
-  const tipoObjeto = p.tipoObjeto || {}
+  const contratacao = p.contratacao && typeof p.contratacao === 'object' ? p.contratacao : {}
   const principais = [
     { label: 'Número/Ano', valor: numeroProcesso(p) },
     { label: 'Situação', valor: p.situacaoDesc || p.situacao || '' },
-    { label: 'Modalidade', valor: tipoObjeto.tipoDescricao || tipoObjeto.descricao || '' },
+    // Na tela o campo "Modalidade" vem da contratação; "Tipo de objeto" é outro.
+    { label: 'Modalidade', valor: (contratacao.modalidade && contratacao.modalidade.descricao) || '' },
+    { label: 'Tipo de objeto', valor: descricaoTipoObjeto(p.tipoObjeto) },
     { label: 'Objeto', valor: p.objeto || '' },
     { label: 'Data do processo', valor: formatarData(p.dataProcesso) },
     { label: 'Valor total dos itens (R$)', valor: formatarValor(p.valorTotalItens) },
@@ -170,7 +204,7 @@ export function montarCamposProcesso(p) {
   // as informações") — depois dos principais, na ordem em que vierem.
   const demais = Object.entries(p)
     .filter(([chave]) => !CHAVES_PRINCIPAIS.has(chave))
-    .map(([chave, valor]) => ({ label: formatarChave(chave), valor: valorProcesso(chave, valor, p) }))
+    .map(([chave, valor]) => ({ label: ROTULOS_PROCESSO[chave] || formatarChave(chave), valor: valorProcesso(chave, valor, p) }))
   return [...principais, ...demais]
 }
 
