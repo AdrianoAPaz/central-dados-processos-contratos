@@ -133,6 +133,11 @@ export function gerarPdfAta(ata) {
     cursor = desenharTabelaDinamica(doc, cursor, ata.itens)
     cursor = desenharAvisoOmitidas(doc, cursor, ata.itens.omitidas)
   }
+  if (ata.ocorrencias && ata.ocorrencias.linhas.length) {
+    cursor = desenharTitulo(doc, cursor, `Ocorrências da ata (${ata.ocorrencias.linhas.length})`)
+    cursor = desenharTabelaDinamica(doc, cursor, ata.ocorrencias)
+    cursor = desenharAvisoOmitidas(doc, cursor, ata.ocorrencias.omitidas)
+  }
   desenharTabelaAnexados(doc, cursor, ata.tabelaAnexados)
   return finalizarDocumento(doc)
 }

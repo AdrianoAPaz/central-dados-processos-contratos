@@ -45,6 +45,39 @@ function valorProcesso(chave, valor, p) {
   return valorCampoDinamico(chave, valor, contextoProcesso(p))
 }
 
+// Rótulo de um cadastro aninhado do Betha ({ descricao } ou texto direto).
+function rotuloCadastro(v) {
+  if (v == null || v === '') return ''
+  return typeof v === 'object' ? String(v.descricao || v.nome || v.tipoDescricao || '') : String(v)
+}
+
+// Pessoa (autoridade, membro): "NOME (CPF)" ou "NOME (Papel)". Devolve ''
+// sem nenhum texto — quem chama segue pro JSON cru, pra análise manual.
+function descreverPessoa(o) {
+  if (!o || typeof o !== 'object') return rotuloCadastro(o)
+  const pessoa = o.pessoa && typeof o.pessoa === 'object' ? o.pessoa : o
+  const nome = pessoa.nome || o.nome || ''
+  if (!nome) return ''
+  const complemento = rotuloCadastro(o.cargo || o.papel || o.funcao || o.tipoMembro || o.atribuicao) || pessoa.cpfCnpj || pessoa.cpf || ''
+  return complemento ? `${nome} (${complemento})` : String(nome)
+}
+
+// Comissão julgadora como na tela: "53 - Permanente - FULANO (Pregoeiro),
+// CICLANA (Membro/Equipe de apoio)". Sem membros, cai na pessoa/descrição.
+function descreverPessoasOuComissao(valor) {
+  if (Array.isArray(valor)) return valor.map(descreverPessoa).filter(Boolean).join(', ')
+  if (!valor || typeof valor !== 'object') return ''
+  const membros = valor.membros || valor.integrantes || valor.membrosComissao || valor.pessoas
+  if (Array.isArray(membros) && membros.length) {
+    const cabecalho = [valor.numero ?? valor.codigo, rotuloCadastro(valor.tipo || valor.tipoComissao), valor.descricao]
+      .filter((v) => v != null && v !== '')
+      .join(' - ')
+    const lista = membros.map(descreverPessoa).filter(Boolean).join(', ')
+    return cabecalho ? `${cabecalho} - ${lista}` : lista
+  }
+  return descreverPessoa(valor)
+}
+
 // Objetos do Compras que não têm descricao/nome e cairiam no JSON cru —
 // formatos vistos nos relatórios gerados pelo usuário (processos 229/2026 e
 // 623/2026, 2026-10-21). Devolve null quando o objeto não tem o dado
@@ -71,6 +104,16 @@ function valorObjetoProcesso(chave, valor, p) {
     const numero = valor.anoSequencial != null ? `${valor.numeroSequencial}/${valor.anoSequencial}` : String(valor.numeroSequencial)
     const modalidade = valor.modalidade && valor.modalidade.descricao
     return modalidade ? `${modalidade} ${numero}` : numero
+  }
+  // Comissão julgadora e autoridade competente (tela "Forma de contratação"):
+  // nome/descrição e, na comissão, os membros com o papel de cada um.
+  if (/comissao|autoridade/i.test(chave)) {
+    const texto = descreverPessoasOuComissao(valor)
+    if (texto) return texto
+  }
+  // Ata gerada a partir de uma ata cancelada: a tela mostra o número dela.
+  if (/^ataCancelada/i.test(chave) && valor.numeroAta != null) {
+    return valor.anoAta != null ? `${valor.numeroAta}/${valor.anoAta}` : String(valor.numeroAta)
   }
   // `atoFinalBO` do histórico: o ato final que gerou a mudança de status.
   if (/^atoFinal/i.test(chave) && (valor.tipoAtoDesc || valor.tipoAto)) return String(valor.tipoAtoDesc || valor.tipoAto)
@@ -114,6 +157,7 @@ export const SUBRECURSOS_EM_TABELA = [
   { chave: 'itens', rotulo: 'Itens', excluir: COLUNAS_ITENS_EXCLUIDAS },
   { chave: 'lotes', rotulo: 'Lotes' },
   { chave: 'participantes', rotulo: 'Participantes' },
+  { chave: 'entidadesparticipantes', rotulo: 'Entidades participantes' },
 ]
 
 // Sub-recursos que viram um DOCUMENTO próprio (um PDF cada), com todos os
@@ -128,7 +172,10 @@ export const SUBRECURSOS_EM_DOCUMENTO = [
   { chave: 'atosfinais', rotulo: 'atos finais', singular: 'ato final' },
   { chave: 'despesas', rotulo: 'despesas', singular: 'despesa' },
   { chave: 'historico', rotulo: 'histórico', singular: 'registro' },
-  { chave: 'atas', rotulo: 'atas de registro de preços', singular: 'ata', ocultar: ['itensAta'] },
+  { chave: 'publicacoes', rotulo: 'publicações', singular: 'publicação' },
+  { chave: 'impugnacoes', rotulo: 'impugnações', singular: 'impugnação' },
+  { chave: 'documentosexigidos', rotulo: 'documentos exigidos', singular: 'documento exigido' },
+  { chave: 'atas', rotulo: 'atas de registro de preços', singular: 'ata', ocultar: ['itensAta', 'ocorrencias'] },
   { chave: 'textos', rotulo: 'textos', singular: 'texto', vazio: MENSAGEM_SEM_TEXTOS },
 ]
 
@@ -216,6 +263,14 @@ const ROTULOS_PROCESSO = {
   controleSaldoDesc: 'Controlar saldo por (descrição)',
 }
 
+// Rótulos da tela "Forma de contratação" para campos do `contratacao` cujo
+// nome na API é diferente.
+const ROTULOS_CONTRATACAO = {
+  membroComissao: 'Comissão julgadora',
+  comissaoJulgadora: 'Comissão julgadora',
+  comissao: 'Comissão julgadora',
+}
+
 // Tipo de objeto (tela: "Compras e Serviços"): objeto com descrição ou enum em
 // texto (ex.: COMPRAS_SERVICOS), que vira palavras.
 function descricaoTipoObjeto(tipoObjeto) {
@@ -244,18 +299,31 @@ export function montarCamposProcesso(p) {
   // de preço, autoridade competente, comissão e data da autorização, que o
   // relatório só trazia como o número da contratação. Só entram os que vierem
   // preenchidos (nomes dos campos vistos no objeto `contratacao`, 2026-10-29).
-  const formaContratacao = [
-    ['Forma de contratação (tipo)', contratacao.formaContratacaoDesc || contratacao.formaContratacao],
-    ['Fundamento legal', contratacao.fundamentacaoLegal],
-    ['Registro de preço', contratacao.registroPreco],
-    ['Modo de disputa', contratacao.modoDisputa],
-    ['Número da chamada pública', contratacao.numeroChamadaPublica],
-    ['Autoridade competente', contratacao.responsavel],
-    ['Comissão responsável', contratacao.membroComissao],
-    ['Data da autorização', contratacao.dataAutorizacaoAdesaoAtaRegPreco],
+  const formaContratacaoMapeada = [
+    ['Forma de contratação (tipo)', 'formaContratacao', contratacao.formaContratacaoDesc || contratacao.formaContratacao],
+    ['Fundamento legal', 'fundamentacaoLegal', contratacao.fundamentacaoLegal],
+    ['Registro de preço', 'registroPreco', contratacao.registroPreco],
+    ['Modo de disputa', 'modoDisputa', contratacao.modoDisputa],
+    ['Número da chamada pública', 'numeroChamadaPublica', contratacao.numeroChamadaPublica],
+    ['Autoridade competente', 'responsavel', contratacao.responsavel],
+    ['Comissão responsável', 'membroComissao', contratacao.membroComissao],
+    ['Data da autorização', 'dataAutorizacaoAdesaoAtaRegPreco', contratacao.dataAutorizacaoAdesaoAtaRegPreco],
   ]
-    .filter(([, valor]) => valor != null && valor !== '')
-    .map(([label, valor]) => ({ label, valor: typeof valor === 'boolean' ? (valor ? 'Sim' : 'Não') : valorProcesso('campo', valor, p) }))
+  const formaContratacao = formaContratacaoMapeada
+    .filter(([, , valor]) => valor != null && valor !== '')
+    .map(([label, chave, valor]) => ({ label, valor: typeof valor === 'boolean' ? (valor ? 'Sim' : 'Não') : valorProcesso(chave, valor, p) }))
+  // Demais dados que a tela "Forma de contratação" mostra (comissão julgadora
+  // com os membros, datas de recebimento/abertura dos envelopes, número da
+  // chamada…) e que o GET `contratacao` devolve: entram os que vierem
+  // preenchidos e ainda não aparecem acima, com o nome do campo da API.
+  const jaMostradas = new Set([...formaContratacaoMapeada.map(([, chave]) => chave), 'id', 'formaContratacaoDesc', 'modalidade', 'numeroSequencial', 'anoSequencial'])
+  for (const [chave, valor] of Object.entries(contratacao)) {
+    if (jaMostradas.has(chave) || valor == null || valor === '' || (Array.isArray(valor) && !valor.length)) continue
+    formaContratacao.push({
+      label: ROTULOS_CONTRATACAO[chave] || formatarChave(chave),
+      valor: typeof valor === 'boolean' ? (valor ? 'Sim' : 'Não') : valorProcesso(chave, valor, p),
+    })
+  }
   principais.push(...formaContratacao)
   // Demais campos que a API devolveu (pedido do usuário no Contratos: "todas
   // as informações") — depois dos principais, na ordem em que vierem.
@@ -494,12 +562,33 @@ function montarDocumentosDemais(p, base) {
       titulo: `${rotulo} do ${base}`,
       vazio,
       tabelaHistorico: chave === 'historico' ? montarTabelaHistoricoProcesso(registros, p) : null,
-      blocos: registros.map((raw, index) =>
-        chave === 'textos'
-          ? { titulo: tituloBlocoTexto(raw, index), campos: camposTextoProcesso(raw, p) }
-          : { titulo: `${singular} ${index + 1}`, campos: camposDe(raw, p, ocultar) },
-      ),
+      blocos: [
+        ...registros.map((raw, index) =>
+          chave === 'textos'
+            ? { titulo: tituloBlocoTexto(raw, index), campos: camposTextoProcesso(raw, p) }
+            : { titulo: `${singular} ${index + 1}`, campos: camposDe(raw, p, ocultar) },
+        ),
+        ...(chave === 'despesas' ? blocoResumoDespesas(registros, p) : []),
+      ],
     }))
+}
+
+// Rodapé da tela "Despesas": saldo remanescente (soma do valor estimado das
+// despesas), total estimado dos itens e a diferença entre os dois.
+function blocoResumoDespesas(despesas, p) {
+  const soma = despesas.reduce((total, d) => total + (Number(d && d.valorEstimado) || 0), 0)
+  const totalItens = Number(p && p.valorTotalItens)
+  if (!despesas.length || Number.isNaN(totalItens)) return []
+  return [
+    {
+      titulo: 'resumo das despesas',
+      campos: [
+        { label: 'Saldo remanescente', valor: `R$ ${formatarValor(soma)}` },
+        { label: 'Total estimado dos itens', valor: `R$ ${formatarValor(totalItens)}` },
+        { label: 'Diferença', valor: `R$ ${formatarValor(soma - totalItens)}` },
+      ],
+    },
+  ]
 }
 
 // Atas de registro de preço — pasta própria no zip do processo (pedido do
@@ -544,6 +633,32 @@ export function numeroAta(raw, index) {
   return ano != null && ano !== '' && !String(numero).includes('/') ? `${numero}/${ano}` : String(numero)
 }
 
+// CPF/CNPJ do fornecedor da ata: a lista de atas da tela mostra "NOME (CNPJ)",
+// mas o relatório só trazia o nome. O nome do campo na API não foi mapeado,
+// então tenta os lugares usuais; sem nenhum, não acrescenta o campo.
+function documentoFornecedor(raw) {
+  const f = raw && raw.fornecedor && typeof raw.fornecedor === 'object' ? raw.fornecedor : {}
+  const pessoa = f.pessoa && typeof f.pessoa === 'object' ? f.pessoa : {}
+  const doc = pessoa.cpfCnpj || pessoa.cnpj || pessoa.cpf || f.cpfCnpj || f.cnpj || f.cpf || raw.cpfCnpjFornecedor || ''
+  return String(doc)
+}
+
+// Campos da ata na ordem da API, com valores monetários formatados
+// ("R$ 1.234,56") e o CPF/CNPJ do fornecedor logo depois dele.
+function camposAta(raw, p) {
+  const chaves = Object.keys(raw || {}).filter((k) => k !== 'itensAta' && k !== 'ocorrencias')
+  const documento = documentoFornecedor(raw)
+  const campos = []
+  chaves.forEach((chave) => {
+    const valor = raw[chave]
+    const texto = valorProcesso(chave, valor, p)
+    const monetario = ehChaveMonetaria(chave) && valor != null && valor !== '' && !Number.isNaN(Number(valor))
+    campos.push({ label: formatarChave(chave), valor: monetario ? `R$ ${formatarValor(valor)}` : texto })
+    if (chave === 'fornecedor' && documento) campos.push({ label: 'CPF/CNPJ do fornecedor', valor: documento })
+  })
+  return campos
+}
+
 // Uma entrada por ata: título do PDF, campos (todos os que a API devolveu),
 // tabela dos itens da ata (`itensAta`, ver completarAtasProcesso no
 // service-worker.js) e os anexos (`arquivos` inline ou do GET da ata).
@@ -556,14 +671,9 @@ export function montarAtasRegistroPreco(p) {
       titulo: `ata ${numero} do ${tituloProcesso(p)}`,
       // Valores monetários da ata (ex.: valorTotalItens) saíam crus, sem
       // separadores nem R$ — formatados como "R$ 1.234,56".
-      campos: camposDe(raw, p, ['itensAta']).map((campo, i) => {
-        const chave = Object.keys(raw || {}).filter((k) => k !== 'itensAta')[i]
-        const valor = raw[chave]
-        return ehChaveMonetaria(chave) && valor != null && valor !== '' && !Number.isNaN(Number(valor))
-          ? { ...campo, valor: `R$ ${formatarValor(valor)}` }
-          : campo
-      }),
+      campos: camposAta(raw, p),
       itens: montarTabelaGenerica(itens, COLUNAS_ITENS_EXCLUIDAS, p),
+      ocorrencias: montarTabelaGenerica(Array.isArray(raw && raw.ocorrencias) ? raw.ocorrencias : [], [], p),
       tabelaAnexados: montarTabelaHistoricoAnexos(raw && raw.arquivos),
       anexos: (Array.isArray(raw && raw.arquivos) ? raw.arquivos : [])
         .map((a) => ({ ...a, origem: `Ata ${numero}` }))
