@@ -484,8 +484,25 @@ export function montarDocumentoTextos(c) {
   const contexto = { entidades: indexarEntidades(c) }
   return {
     titulo: tituloTextos(c),
-    blocos: textos.map((raw, index) => ({ titulo: tituloBlocoTexto(raw, index), campos: camposTexto(raw, contexto) })),
+    blocos: textos.map((raw, index) => ({
+      titulo: tituloBlocoTexto(raw, index),
+      campos: camposTexto(raw, contexto),
+      tabelaHistoricoAnexos: montarTabelaHistoricoAnexos(raw && raw.arquivos),
+    })),
   }
+}
+
+// Quem anexou cada arquivo do texto e quando — o "Detalhes do anexo" do Betha
+// (confirmado ao vivo, 2026-10-30): vem inline em cada item de `arquivos`
+// como `usuarioCriacao` e `dhCriacao` ("2026-10-28 16:50:22.887"), sem
+// endpoint próprio de histórico.
+export function montarTabelaHistoricoAnexos(arquivos) {
+  const linhas = (Array.isArray(arquivos) ? arquivos : [])
+    .filter((arquivo) => arquivo && (arquivo.usuarioCriacao || arquivo.dhCriacao))
+    .map((arquivo) => [valorTexto(arquivo.nome), arquivo.usuarioCriacao || '', formatarDataHora(arquivo.dhCriacao)])
+  return linhas.length
+    ? { colunas: ['Arquivo', 'Anexado por', 'Data/hora'], linhas }
+    : { colunas: [], linhas: [] }
 }
 
 // "texto 1 — Termo de Referência": o `titulo` do próprio texto, quando houver
