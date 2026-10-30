@@ -518,7 +518,15 @@ export function montarAtasRegistroPreco(p) {
     return {
       numero,
       titulo: `ata ${numero} do ${tituloProcesso(p)}`,
-      campos: camposDe(raw, p, ['itensAta']),
+      // Valores monetários da ata (ex.: valorTotalItens) saíam crus, sem
+      // separadores nem R$ — formatados como "R$ 1.234,56".
+      campos: camposDe(raw, p, ['itensAta']).map((campo, i) => {
+        const chave = Object.keys(raw || {}).filter((k) => k !== 'itensAta')[i]
+        const valor = raw[chave]
+        return ehChaveMonetaria(chave) && valor != null && valor !== '' && !Number.isNaN(Number(valor))
+          ? { ...campo, valor: `R$ ${formatarValor(valor)}` }
+          : campo
+      }),
       itens: montarTabelaGenerica(itens, COLUNAS_ITENS_EXCLUIDAS, p),
       anexos: (Array.isArray(raw && raw.arquivos) ? raw.arquivos : [])
         .map((a) => ({ ...a, origem: `Ata ${numero}` }))
