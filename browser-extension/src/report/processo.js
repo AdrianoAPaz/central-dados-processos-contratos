@@ -56,7 +56,9 @@ async function montarPacoteRelatorio(processo, anexos, container) {
 
   const numero = numeroParaArquivo(processo)
   const contratacoes = Array.isArray(processo.contratacoesVinculadas) ? processo.contratacoesVinculadas : []
-  const registroPreco = ehRegistroPreco(processo)
+  // Atas só saem se o usuário marcou a opção no popup (e o processo é de
+  // registro de preço).
+  const registroPreco = Boolean(processo.incluirAtasRegistroPreco) && ehRegistroPreco(processo)
   // Sem contratações vinculadas nem atas o zip continua só com os arquivos do
   // processo, soltos na raiz. Com elas, o zip ganha pastas irmãs na raiz: a do
   // processo, a de "Atas de Registro de Preço" (uma subpasta por ata) e a de
