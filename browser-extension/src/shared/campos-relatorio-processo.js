@@ -169,9 +169,33 @@ function chaveExcluida(chave, excluir) {
 export const SUBRECURSOS_EM_TABELA = [
   { chave: 'itens', rotulo: 'Itens', excluir: COLUNAS_ITENS_EXCLUIDAS },
   { chave: 'lotes', rotulo: 'Lotes' },
-  { chave: 'participantes', rotulo: 'Participantes' },
+  { chave: 'participantes', rotulo: 'Participantes', montar: montarTabelaParticipantes },
   { chave: 'entidadesparticipantes', rotulo: 'Entidades participantes' },
 ]
+
+// Tabela de participantes com as colunas da tela "Participantes" (formato visto
+// em 2026-10-30): a genérica cortava nas 8 primeiras chaves e deixava de fora o
+// "Local/Regional" (`sedeMpeDesc`, só vem para quem declarou MPE).
+function montarTabelaParticipantes(participantes, p) {
+  if (!Array.isArray(participantes) || !participantes.length) return { colunas: [], linhas: [], omitidas: 0 }
+  const texto = (v) => (v == null ? '' : String(v))
+  const simNao = (v) => (v == null ? '' : v ? 'Sim' : 'Não')
+  return {
+    colunas: ['Participante', 'CPF/CNPJ', 'Tipo de participação', 'Declaração MPE', 'Local/Regional', 'Situação da documentação', 'Credenciamento', 'Renunciou recurso', 'Possui proposta'],
+    linhas: participantes.map((r) => [
+      texto(r.nome || (r.fornecedor && r.fornecedor.pessoa && r.fornecedor.pessoa.nome)),
+      formatarCpfCnpj(r.cpfCnpj || (r.fornecedor && r.fornecedor.pessoa && r.fornecedor.pessoa.cpfCnpj)),
+      texto(r.tipoParticipacaoDesc || r.tipoParticipacao),
+      simNao(r.declaracaoMPE),
+      texto(r.sedeMpeDesc),
+      texto(r.situacaoDocumentacaoDesc || r.situacaoDocumentacao),
+      texto(valorProcesso('dhCredenciamento', r.dhCredenciamento, p)),
+      simNao(r.renunciouRecurso),
+      simNao(r.possuiProposta),
+    ]),
+    omitidas: 0,
+  }
+}
 
 // Sub-recursos que viram um DOCUMENTO próprio (um PDF cada), com todos os
 // campos de cada registro — mesmo princípio dos aditivos/solicitações do
