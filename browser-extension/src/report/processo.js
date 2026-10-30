@@ -10,6 +10,7 @@ import {
   montarAtasRegistroPreco,
   montarCamposProcesso,
   montarDocumentosSubrecursos,
+  montarTabelaAnexadosProcesso,
   montarTabelaGenerica,
   numeroProcesso,
   subrecurso,
@@ -175,6 +176,15 @@ async function carregar() {
     containerTabelas.appendChild(tabela)
   }
 
+  // Anexados por: quem anexou cada arquivo do processo e quando.
+  const tabelaAnexados = criarTabelaDinamica(montarTabelaAnexadosProcesso(processo))
+  if (tabelaAnexados) {
+    const h2 = document.createElement('h2')
+    h2.textContent = formatarTitulo('Anexados por')
+    containerTabelas.appendChild(h2)
+    containerTabelas.appendChild(tabelaAnexados)
+  }
+
   // Demais sub-recursos — um bloco por registro, com todos os campos.
   const containerDocumentos = document.getElementById('documentos')
   for (const documento of montarDocumentosSubrecursos(processo)) {
@@ -187,6 +197,13 @@ async function carregar() {
       vazio.className = 'sem-itens'
       vazio.textContent = documento.vazio
       containerDocumentos.appendChild(vazio)
+    }
+    const tabelaHistorico = documento.tabelaHistorico && criarTabelaDinamica(documento.tabelaHistorico)
+    if (tabelaHistorico) {
+      const h3 = document.createElement('h3')
+      h3.textContent = formatarTitulo('Trilha de auditoria')
+      containerDocumentos.appendChild(h3)
+      containerDocumentos.appendChild(tabelaHistorico)
     }
     for (const bloco of documento.blocos) {
       const div = document.createElement('div')

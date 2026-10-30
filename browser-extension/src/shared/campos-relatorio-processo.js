@@ -20,6 +20,7 @@ import {
   formatarData,
   formatarValor,
   indexarEntidades,
+  montarTabelaHistoricoAnexos,
   tituloBlocoTexto,
   valorCampoDinamico,
 } from './campos-relatorio.js'
@@ -130,6 +131,40 @@ export const SUBRECURSOS_EM_DOCUMENTO = [
   { chave: 'atas', rotulo: 'atas de registro de preços', singular: 'ata', ocultar: ['itensAta'] },
   { chave: 'textos', rotulo: 'textos', singular: 'texto', vazio: MENSAGEM_SEM_TEXTOS },
 ]
+
+// Histórico do processo (tela "Histórico" do Compras) — trilha de auditoria:
+// cada mudança de situação com data/hora, quem registrou, situação anterior e
+// nova, ato final e observação. Cronológico (mais antigo primeiro). É um
+// RESUMO: o documento mantém, logo abaixo, o bloco com TODOS os campos de cada
+// registro, então nada do que a API devolveu deixa de aparecer. Os nomes dos
+// campos têm mais de uma variante (o catálogo não foi totalmente mapeado).
+export function montarTabelaHistoricoProcesso(registros, p = null) {
+  if (!Array.isArray(registros) || !registros.length) return { colunas: [], linhas: [] }
+  const dataHoraDe = (h) => (h && (h.dataHoraCriacao || h.dhCriacao || h.dhHistorico || h.dataHora || h.data)) || ''
+  const ordenados = [...registros].sort((a, b) => String(dataHoraDe(a)).localeCompare(String(dataHoraDe(b))))
+  const texto = (chave, valor) => (valor == null || valor === '' ? '' : String(valorProcesso(chave, valor, p)))
+  const quem = (h) => {
+    const u = (h && (h.usuario || h.usuarioCriacao)) || ''
+    return typeof u === 'object' ? String(u.nome || u.login || u.id || '') : String(u)
+  }
+  return {
+    colunas: ['Data/hora', 'Registrado por', 'Situação anterior', 'Nova situação', 'Ato final', 'Observação'],
+    linhas: ordenados.map((h) => [
+      texto('dataHoraCriacao', dataHoraDe(h)),
+      quem(h),
+      texto('statusAnterior', h && h.statusAnterior),
+      texto('statusNovo', h && (h.statusNovoDesc || h.statusNovo || h.situacaoDesc || h.situacao)),
+      texto('atoFinalBO', h && (h.atoFinalBO || h.atoFinal)),
+      texto('observacao', h && (h.observacao || h.motivo || h.justificativa || h.informacao)),
+    ]),
+  }
+}
+
+// "Anexados por" (arquivo, quem anexou e quando) dos anexos do processo — o
+// `arquivos` do processo e o dos textos, já reunidos em `subrecursos.anexos`.
+export function montarTabelaAnexadosProcesso(p) {
+  return montarTabelaHistoricoAnexos(subrecurso(p, 'anexos'))
+}
 
 export function numeroProcesso(p) {
   if (p.numeroProcesso == null) return p.id != null ? `id ${p.id}` : ''
@@ -458,6 +493,7 @@ function montarDocumentosDemais(p, base) {
       chave,
       titulo: `${rotulo} do ${base}`,
       vazio,
+      tabelaHistorico: chave === 'historico' ? montarTabelaHistoricoProcesso(registros, p) : null,
       blocos: registros.map((raw, index) =>
         chave === 'textos'
           ? { titulo: tituloBlocoTexto(raw, index), campos: camposTextoProcesso(raw, p) }
@@ -528,6 +564,7 @@ export function montarAtasRegistroPreco(p) {
           : campo
       }),
       itens: montarTabelaGenerica(itens, COLUNAS_ITENS_EXCLUIDAS, p),
+      tabelaAnexados: montarTabelaHistoricoAnexos(raw && raw.arquivos),
       anexos: (Array.isArray(raw && raw.arquivos) ? raw.arquivos : [])
         .map((a) => ({ ...a, origem: `Ata ${numero}` }))
         .filter((a) => a && a.id),

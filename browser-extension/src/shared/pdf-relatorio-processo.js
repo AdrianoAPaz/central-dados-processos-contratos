@@ -12,6 +12,7 @@ import {
   montarCamposProcesso,
   montarDocumentosParticipantesIndividuais,
   montarDocumentosSubrecursos,
+  montarTabelaAnexadosProcesso,
   montarTabelaGenerica,
   subrecurso,
   tituloProcesso,
@@ -42,7 +43,15 @@ export function gerarPdfProcesso(processo) {
     cursor = desenharAvisoOmitidas(doc, cursor, tabela.omitidas)
   }
 
+  // Trilha de auditoria dos anexos: quem anexou cada arquivo e quando.
+  desenharTabelaAnexados(doc, cursor, montarTabelaAnexadosProcesso(processo))
+
   return finalizarDocumento(doc)
+}
+
+function desenharTabelaAnexados(doc, cursor, tabela) {
+  if (!tabela || !tabela.linhas.length) return cursor
+  return desenharTabelaDinamica(doc, desenharTitulo(doc, cursor, 'Anexados por'), tabela)
 }
 
 // Aviso abaixo de uma tabela que não coube inteira no PDF.
@@ -59,6 +68,11 @@ export function gerarPdfSubrecurso(documento) {
   let cursor = inicioDoc
   if (!documento.blocos.length && documento.vazio) {
     cursor = desenharAviso(doc, cursor, documento.vazio)
+  }
+  // Histórico: resumo cronológico (quem, quando, situação) antes do detalhe.
+  if (documento.tabelaHistorico && documento.tabelaHistorico.linhas.length) {
+    cursor = desenharTitulo(doc, cursor, `Trilha de auditoria (${documento.tabelaHistorico.linhas.length})`)
+    cursor = desenharTabelaDinamica(doc, cursor, documento.tabelaHistorico)
   }
   for (const bloco of documento.blocos) {
     cursor = desenharTitulo(doc, cursor, bloco.titulo)
@@ -117,8 +131,9 @@ export function gerarPdfAta(ata) {
   if (ata.itens.linhas.length) {
     cursor = desenharTitulo(doc, cursor, `Itens da ata (${ata.itens.linhas.length})`)
     cursor = desenharTabelaDinamica(doc, cursor, ata.itens)
-    desenharAvisoOmitidas(doc, cursor, ata.itens.omitidas)
+    cursor = desenharAvisoOmitidas(doc, cursor, ata.itens.omitidas)
   }
+  desenharTabelaAnexados(doc, cursor, ata.tabelaAnexados)
   return finalizarDocumento(doc)
 }
 
