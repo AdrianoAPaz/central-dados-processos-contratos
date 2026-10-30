@@ -1,3 +1,5 @@
+import { ehRegistroPreco } from '../shared/campos-relatorio-processo.js'
+
 const statusEl = document.getElementById('status')
 const statusTextoEl = document.getElementById('statusTexto')
 const resultadoEl = document.getElementById('resultado')
@@ -10,6 +12,8 @@ const statusComprasTextoEl = document.getElementById('statusComprasTexto')
 const resultadoProcessoEl = document.getElementById('resultadoProcesso')
 const opcoesProcessoEl = document.getElementById('opcoesProcesso')
 const incluirContratacoesEl = document.getElementById('incluirContratacoes')
+const opcaoAtasEl = document.getElementById('opcaoAtas')
+const incluirAtasEl = document.getElementById('incluirAtas')
 
 const ICONE_ENVIAR = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7Z"/></svg>`
 const ICONE_PDF = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 20h16"/></svg>`
@@ -645,6 +649,9 @@ function renderProcessos(lista, aproximado) {
   }
   // Opção só aparece depois da busca, com processo na tela pra ela valer.
   opcoesProcessoEl.hidden = false
+  // Opção das atas só quando algum processo listado é de registro de preço.
+  opcaoAtasEl.hidden = !lista.some((p) => ehRegistroPreco(p))
+  if (opcaoAtasEl.hidden) incluirAtasEl.checked = false
   if (aproximado) {
     mostrarMsg('Nenhum processo com esse número exato — mostrando números parecidos.', 'info')
   }
@@ -879,7 +886,11 @@ async function gerarPdfProcesso(processo, botao) {
     // As contratações vão junto do processo, numa aba só: a página monta um
     // único zip com a pasta do processo e a pasta "Contratações".
     await chrome.storage.local.set({
-      [CHAVE_RELATORIO_PROCESSO]: { ...processoCompleto, contratacoesVinculadas: vinculadas.contratacoes },
+      [CHAVE_RELATORIO_PROCESSO]: {
+        ...processoCompleto,
+        contratacoesVinculadas: vinculadas.contratacoes,
+        incluirAtasRegistroPreco: !opcaoAtasEl.hidden && incluirAtasEl.checked,
+      },
     })
     await chrome.tabs.create({ url: chrome.runtime.getURL('src/report/processo.html') })
     mostrarMsg(avisos.length ? `Relatório aberto, mas: ${avisos.join('; ')}.` : '', avisos.length ? 'info' : '')
@@ -912,6 +923,7 @@ buscarBtn.addEventListener('click', async () => {
   resultadoEl.innerHTML = ''
   resultadoProcessoEl.innerHTML = ''
   opcoesProcessoEl.hidden = true
+  opcaoAtasEl.hidden = true
   buscarBtn.disabled = true
   buscarIconeEl.innerHTML = ICONE_SPINNER
   buscarTextoEl.textContent = 'Buscando…'
