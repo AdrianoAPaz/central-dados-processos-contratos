@@ -5,6 +5,7 @@
 // diálogo nativo do navegador, por isso não dá pra usá-lo aqui. Usa jsPDF +
 // jspdf-autotable vendorizados em `src/vendor/` (ver README ali sobre por
 // que são UMD e não ESM).
+import { formatarTitulo } from './titulo.js'
 import {
   montarCamposRelatorio,
   montarSecoesAditivos,
@@ -27,6 +28,8 @@ import {
 } from './campos-relatorio.js'
 
 const MARGEM = 40
+// Serifada (Times), padrão de documento administrativo/de auditoria.
+const FONTE = 'times'
 const SUBTITULO_PADRAO = 'Central de Dados de Processos e Contratos'
 
 // Estilo sóbrio, pensado pra leitura/conferência de auditoria: paleta neutra
@@ -41,7 +44,7 @@ const COR_FUNDO_ROTULO = [243, 243, 243]
 const COR_FUNDO_CABECALHO = [229, 229, 229]
 const COR_FUNDO_ZEBRA = [249, 249, 249]
 const ESTILO_CELULA = {
-  font: 'helvetica',
+  font: FONTE,
   textColor: COR_TEXTO,
   lineColor: COR_LINHA,
   lineWidth: 0.5,
@@ -77,25 +80,25 @@ export function desenharTitulo(doc, cursor, texto) {
   // órfão no fim da página.
   cursor = garantirEspaco(doc, cursor, 60)
   const largura = doc.internal.pageSize.getWidth()
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(11)
+  doc.setFont(FONTE, 'bold')
+  doc.setFontSize(12)
   doc.setTextColor(...COR_TEXTO)
-  doc.text(texto, MARGEM, cursor)
+  doc.text(formatarTitulo(texto), MARGEM, cursor)
   doc.setDrawColor(...COR_LINHA)
   doc.setLineWidth(0.5)
   doc.line(MARGEM, cursor + 4, largura - MARGEM, cursor + 4)
-  doc.setFont('helvetica', 'normal')
+  doc.setFont(FONTE, 'normal')
   return cursor + 12
 }
 
 // Mensagem em itálico cinza (ex.: "Sem itens vinculados").
 export function desenharAviso(doc, cursor, texto, tamanhoFonte = 9) {
   cursor = garantirEspaco(doc, cursor, 20)
-  doc.setFont('helvetica', 'italic')
+  doc.setFont(FONTE, 'italic')
   doc.setFontSize(tamanhoFonte)
   doc.setTextColor(...COR_TEXTO_SUAVE)
   doc.text(texto, MARGEM, cursor + 8)
-  doc.setFont('helvetica', 'normal')
+  doc.setFont(FONTE, 'normal')
   doc.setTextColor(...COR_TEXTO)
   return cursor + 28
 }
@@ -107,7 +110,7 @@ export function desenharTabelaCampos(doc, cursor, campos) {
     startY: cursor,
     margin: { left: MARGEM, right: MARGEM, bottom: MARGEM + 10 },
     theme: 'grid',
-    styles: { ...ESTILO_CELULA, fontSize: 9, cellPadding: { top: 4, bottom: 4, left: 6, right: 6 } },
+    styles: { ...ESTILO_CELULA, fontSize: 10, cellPadding: { top: 4, bottom: 4, left: 6, right: 6 } },
     columnStyles: {
       0: { fontStyle: 'bold', cellWidth: 150, fillColor: COR_FUNDO_ROTULO },
     },
@@ -140,7 +143,7 @@ export function desenharTabelaDinamica(doc, cursor, { colunas, linhas }) {
     startY: cursor,
     margin: { left: MARGEM, right: MARGEM, bottom: MARGEM + 10 },
     theme: 'grid',
-    styles: { ...ESTILO_CELULA, fontSize: 8, cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 } },
+    styles: { ...ESTILO_CELULA, fontSize: 9, cellPadding: { top: 3.5, bottom: 3.5, left: 5, right: 5 } },
     headStyles: {
       fillColor: COR_FUNDO_CABECALHO,
       textColor: COR_TEXTO,
@@ -166,15 +169,16 @@ export function novoDocumento(titulo) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
   const largura = doc.internal.pageSize.getWidth()
   let cursor = MARGEM
+  titulo = formatarTitulo(titulo)
   doc.tituloRelatorio = titulo
 
   doc.setTextColor(...COR_TEXTO)
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(15)
+  doc.setFont(FONTE, 'bold')
+  doc.setFontSize(16)
   doc.text(titulo, MARGEM, cursor)
   cursor += 16
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(9)
+  doc.setFont(FONTE, 'normal')
+  doc.setFontSize(10)
   doc.setTextColor(...COR_TEXTO_SUAVE)
   doc.text(SUBTITULO_PADRAO, MARGEM, cursor)
   cursor += 8
@@ -195,7 +199,7 @@ export function finalizarDocumento(doc) {
     doc.setDrawColor(...COR_LINHA)
     doc.setLineWidth(0.5)
     doc.line(MARGEM, height - 32, width - MARGEM, height - 32)
-    doc.setFont('helvetica', 'normal')
+    doc.setFont(FONTE, 'normal')
     doc.setFontSize(8)
     doc.setTextColor(...COR_TEXTO_SUAVE)
     doc.text(`${SUBTITULO_PADRAO} — ${doc.tituloRelatorio}`, MARGEM, height - 20)

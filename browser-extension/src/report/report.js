@@ -18,6 +18,7 @@ import {
   MENSAGEM_SEM_TEXTOS,
 } from '../shared/campos-relatorio.js'
 import { criarZip } from '../shared/zip.js'
+import { formatarTitulo } from '../shared/titulo.js'
 import { listarDocumentosRelatorio } from '../shared/pdf-relatorio.js'
 import { criarTabelaCampos, criarTabelaDinamica } from '../shared/dom-relatorio.js'
 import { baixarBlob, coletarArquivosPacote } from '../shared/pacote.js'
@@ -32,7 +33,7 @@ const STORAGE_KEY = 'centralDados.relatorioAtual'
 // relatórios separados, não um único PDF juntando tudo.
 async function montarPacoteRelatorio(contrato, anexos, container) {
   const titulo = document.createElement('h2')
-  titulo.textContent = 'Anexos e relatório em PDF'
+  titulo.textContent = formatarTitulo('Anexos e relatório em PDF')
   container.appendChild(titulo)
 
   const lista = document.createElement('ul')
@@ -73,7 +74,7 @@ async function carregar() {
   const tabelaItensContrato = criarTabelaDinamica(montarTabelaItens(contrato.itens))
   if (tabelaItensContrato) {
     const titulo = document.createElement('h2')
-    titulo.textContent = `Itens do contrato (${contrato.itens.length})`
+    titulo.textContent = formatarTitulo(`Itens do contrato (${contrato.itens.length})`)
     containerItensContrato.appendChild(titulo)
     containerItensContrato.appendChild(tabelaItensContrato)
   }
@@ -84,7 +85,7 @@ async function carregar() {
   // Aparece sempre — sem responsáveis, com o mesmo aviso do documento.
   const tabelaResponsaveis = criarTabelaDinamica(montarTabelaResponsaveis(contrato.responsaveis))
   const tituloResponsaveis = document.createElement('h2')
-  tituloResponsaveis.textContent = `Responsáveis (${(contrato.responsaveis || []).length})`
+  tituloResponsaveis.textContent = formatarTitulo(`Responsáveis (${(contrato.responsaveis || []).length})`)
   containerResponsaveis.appendChild(tituloResponsaveis)
   if (tabelaResponsaveis) {
     containerResponsaveis.appendChild(tabelaResponsaveis)
@@ -99,7 +100,7 @@ async function carregar() {
   if (secoesAditivos.length) {
     const container = document.getElementById('aditivos')
     const titulo = document.createElement('h2')
-    titulo.textContent = `Aditivos (${secoesAditivos.length})`
+    titulo.textContent = formatarTitulo(`Aditivos (${secoesAditivos.length})`)
     container.appendChild(titulo)
 
     for (const secao of secoesAditivos) {
@@ -107,7 +108,7 @@ async function carregar() {
       bloco.className = 'aditivo-secao'
 
       const h3 = document.createElement('h3')
-      h3.textContent = secao.titulo
+      h3.textContent = formatarTitulo(secao.titulo)
       bloco.appendChild(h3)
       bloco.appendChild(criarTabelaCampos(secao.campos))
 
@@ -142,7 +143,7 @@ async function carregar() {
     if (!secoes.length) continue
     const container = document.getElementById(id)
     const titulo = document.createElement('h2')
-    titulo.textContent = `${rotulo} (${secoes.length})`
+    titulo.textContent = formatarTitulo(`${rotulo} (${secoes.length})`)
     container.appendChild(titulo)
 
     for (const secao of secoes) {
@@ -150,7 +151,7 @@ async function carregar() {
       bloco.className = 'aditivo-secao'
 
       const h3 = document.createElement('h3')
-      h3.textContent = secao.titulo
+      h3.textContent = formatarTitulo(secao.titulo)
       bloco.appendChild(h3)
       bloco.appendChild(criarTabelaCampos(secao.campos))
 
@@ -168,7 +169,7 @@ async function carregar() {
   if (secoesSf.length) {
     const container = document.getElementById('solicitacoesFornecimento')
     const titulo = document.createElement('h2')
-    titulo.textContent = `Solicitações de fornecimento (${secoesSf.length})`
+    titulo.textContent = formatarTitulo(`Solicitações de fornecimento (${secoesSf.length})`)
     container.appendChild(titulo)
 
     for (const secao of secoesSf) {
@@ -176,7 +177,7 @@ async function carregar() {
       bloco.className = 'aditivo-secao'
 
       const h3 = document.createElement('h3')
-      h3.textContent = secao.titulo
+      h3.textContent = formatarTitulo(secao.titulo)
       bloco.appendChild(h3)
       bloco.appendChild(criarTabelaCampos(secao.campos))
 
@@ -196,7 +197,7 @@ async function carregar() {
       const tabelaHistoricoSf = criarTabelaDinamica(secao.tabelaHistorico)
       if (tabelaHistoricoSf) {
         const h4 = document.createElement('h4')
-        h4.textContent = 'Histórico'
+        h4.textContent = formatarTitulo('Histórico')
         bloco.appendChild(h4)
         bloco.appendChild(tabelaHistoricoSf)
       }
@@ -211,7 +212,7 @@ async function carregar() {
   if (secoesInteracoes.length) {
     const container = document.getElementById('interacoesContabilidade')
     const titulo = document.createElement('h2')
-    titulo.textContent = `Interações contábeis (${secoesInteracoes.length})`
+    titulo.textContent = formatarTitulo(`Interações contábeis (${secoesInteracoes.length})`)
     container.appendChild(titulo)
 
     for (const secao of secoesInteracoes) {
@@ -219,7 +220,7 @@ async function carregar() {
       bloco.className = 'aditivo-secao'
 
       const h3 = document.createElement('h3')
-      h3.textContent = secao.titulo
+      h3.textContent = formatarTitulo(secao.titulo)
       bloco.appendChild(h3)
       bloco.appendChild(criarTabelaCampos(secao.campos))
 
@@ -227,7 +228,7 @@ async function carregar() {
       const tabelaHistoricoIc = criarTabelaDinamica(secao.tabelaHistorico)
       if (tabelaHistoricoIc) {
         const h4 = document.createElement('h4')
-        h4.textContent = 'Histórico'
+        h4.textContent = formatarTitulo('Histórico')
         bloco.appendChild(h4)
         bloco.appendChild(tabelaHistoricoIc)
       }
@@ -248,7 +249,7 @@ async function carregar() {
     const container = document.getElementById('recebimentos')
     const totalRecebimentos = secoesRecebimentos.reduce((total, s) => total + s.recebimentos.length, 0)
     const titulo = document.createElement('h2')
-    titulo.textContent = `Recebimentos (${totalRecebimentos})`
+    titulo.textContent = formatarTitulo(`Recebimentos (${totalRecebimentos})`)
     container.appendChild(titulo)
 
     for (const secaoSf of secoesRecebimentos) {
@@ -256,12 +257,12 @@ async function carregar() {
       blocoSf.className = 'aditivo-secao'
 
       const h3 = document.createElement('h3')
-      h3.textContent = secaoSf.titulo
+      h3.textContent = formatarTitulo(secaoSf.titulo)
       blocoSf.appendChild(h3)
 
       for (const recebimento of secaoSf.recebimentos) {
         const h4 = document.createElement('h4')
-        h4.textContent = recebimento.titulo
+        h4.textContent = formatarTitulo(recebimento.titulo)
         blocoSf.appendChild(h4)
         blocoSf.appendChild(criarTabelaCampos(recebimento.campos))
 
@@ -288,7 +289,7 @@ async function carregar() {
   const documentoPublicacoes = montarDocumentoPublicacoes(contrato)
   const containerPublicacoes = document.getElementById('publicacoes')
   const tituloPublicacoes = document.createElement('h2')
-  tituloPublicacoes.textContent = `Publicações (${documentoPublicacoes.blocos.length})`
+  tituloPublicacoes.textContent = formatarTitulo(`Publicações (${documentoPublicacoes.blocos.length})`)
   containerPublicacoes.appendChild(tituloPublicacoes)
 
   if (!documentoPublicacoes.blocos.length) {
@@ -301,7 +302,7 @@ async function carregar() {
     const div = document.createElement('div')
     div.className = 'aditivo-secao'
     const h3 = document.createElement('h3')
-    h3.textContent = bloco.titulo
+    h3.textContent = formatarTitulo(bloco.titulo)
     div.appendChild(h3)
     div.appendChild(criarTabelaCampos(bloco.campos))
     containerPublicacoes.appendChild(div)
@@ -312,7 +313,7 @@ async function carregar() {
   const documentoDespesas = montarDocumentoDespesas(contrato)
   const containerDespesas = document.getElementById('despesas')
   const tituloDespesas = document.createElement('h2')
-  tituloDespesas.textContent = `Despesas (${documentoDespesas.blocos.length})`
+  tituloDespesas.textContent = formatarTitulo(`Despesas (${documentoDespesas.blocos.length})`)
   containerDespesas.appendChild(tituloDespesas)
 
   if (!documentoDespesas.blocos.length) {
@@ -325,7 +326,7 @@ async function carregar() {
     const div = document.createElement('div')
     div.className = 'aditivo-secao'
     const h3 = document.createElement('h3')
-    h3.textContent = bloco.titulo
+    h3.textContent = formatarTitulo(bloco.titulo)
     div.appendChild(h3)
     div.appendChild(criarTabelaCampos(bloco.campos))
     containerDespesas.appendChild(div)
@@ -337,7 +338,7 @@ async function carregar() {
   const documentoTextos = montarDocumentoTextos(contrato)
   const containerTextos = document.getElementById('textos')
   const tituloTextos = document.createElement('h2')
-  tituloTextos.textContent = `Textos (${documentoTextos.blocos.length})`
+  tituloTextos.textContent = formatarTitulo(`Textos (${documentoTextos.blocos.length})`)
   containerTextos.appendChild(tituloTextos)
 
   if (!documentoTextos.blocos.length) {
@@ -350,7 +351,7 @@ async function carregar() {
     const div = document.createElement('div')
     div.className = 'aditivo-secao'
     const h3 = document.createElement('h3')
-    h3.textContent = bloco.titulo
+    h3.textContent = formatarTitulo(bloco.titulo)
     div.appendChild(h3)
     div.appendChild(criarTabelaCampos(bloco.campos))
     containerTextos.appendChild(div)
