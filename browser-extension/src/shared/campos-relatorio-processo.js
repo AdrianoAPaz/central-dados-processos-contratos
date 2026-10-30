@@ -53,13 +53,24 @@ function rotuloCadastro(v) {
 
 // Pessoa (autoridade, membro): "NOME (CPF)" ou "NOME (Papel)". Devolve ''
 // sem nenhum texto — quem chama segue pro JSON cru, pra análise manual.
+// Formato visto em /contratacao (2026-10-30): membro = { responsavel: { pessoa:
+// { nome, cpfCnpj } }, atribuicaoDesc }; autoridade = { pessoa: { nome, cpfCnpj } }.
 function descreverPessoa(o) {
   if (!o || typeof o !== 'object') return rotuloCadastro(o)
-  const pessoa = o.pessoa && typeof o.pessoa === 'object' ? o.pessoa : o
+  const responsavel = o.responsavel && typeof o.responsavel === 'object' ? o.responsavel : o
+  const pessoa = responsavel.pessoa && typeof responsavel.pessoa === 'object' ? responsavel.pessoa : responsavel
   const nome = pessoa.nome || o.nome || ''
   if (!nome) return ''
-  const complemento = rotuloCadastro(o.cargo || o.papel || o.funcao || o.tipoMembro || o.atribuicao) || pessoa.cpfCnpj || pessoa.cpf || ''
+  // Membro mostra o papel (Pregoeiro, Membro/Equipe de apoio); a autoridade, o CPF.
+  const complemento = o.atribuicaoDesc || rotuloCadastro(o.atribuicao) || formatarCpfCnpj(pessoa.cpfCnpj || pessoa.cpf)
   return complemento ? `${nome} (${complemento})` : String(nome)
+}
+
+function formatarCpfCnpj(valor) {
+  const d = String(valor || '').replace(/\D/g, '')
+  if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
+  if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5')
+  return d
 }
 
 // Comissão julgadora como na tela: "53 - Permanente - FULANO (Pregoeiro),
@@ -67,9 +78,11 @@ function descreverPessoa(o) {
 function descreverPessoasOuComissao(valor) {
   if (Array.isArray(valor)) return valor.map(descreverPessoa).filter(Boolean).join(', ')
   if (!valor || typeof valor !== 'object') return ''
-  const membros = valor.membros || valor.integrantes || valor.membrosComissao || valor.pessoas
+  // `membroComissao` = { comissaoLicitacao: { numero, tipoComissaoLicitacaoDesc, membros } }.
+  const comissao = valor.comissaoLicitacao && typeof valor.comissaoLicitacao === 'object' ? valor.comissaoLicitacao : valor
+  const membros = comissao.membros || comissao.integrantes || comissao.membrosComissao || comissao.pessoas
   if (Array.isArray(membros) && membros.length) {
-    const cabecalho = [valor.numero ?? valor.codigo, rotuloCadastro(valor.tipo || valor.tipoComissao), valor.descricao]
+    const cabecalho = [comissao.numero ?? comissao.codigo, comissao.tipoComissaoLicitacaoDesc || rotuloCadastro(comissao.tipo), comissao.descricao]
       .filter((v) => v != null && v !== '')
       .join(' - ')
     const lista = membros.map(descreverPessoa).filter(Boolean).join(', ')
@@ -266,9 +279,11 @@ const ROTULOS_PROCESSO = {
 // Rótulos da tela "Forma de contratação" para campos do `contratacao` cujo
 // nome na API é diferente.
 const ROTULOS_CONTRATACAO = {
-  membroComissao: 'Comissão julgadora',
-  comissaoJulgadora: 'Comissão julgadora',
-  comissao: 'Comissão julgadora',
+  dataInicioRecebimentoEnvelope: 'Recebimento dos envelopes — início',
+  dataFinalRecebimentoEnvelope: 'Recebimento dos envelopes — fim',
+  dataAberturaEnvelope: 'Abertura dos envelopes',
+  dtFormaContratacao: 'Data da forma de contratação',
+  percentCotaReservada: 'Percentual de cota reservada',
 }
 
 // Tipo de objeto (tela: "Compras e Serviços"): objeto com descrição ou enum em
@@ -305,8 +320,8 @@ export function montarCamposProcesso(p) {
     ['Registro de preço', 'registroPreco', contratacao.registroPreco],
     ['Modo de disputa', 'modoDisputa', contratacao.modoDisputa],
     ['Número da chamada pública', 'numeroChamadaPublica', contratacao.numeroChamadaPublica],
-    ['Autoridade competente', 'responsavel', contratacao.responsavel],
-    ['Comissão responsável', 'membroComissao', contratacao.membroComissao],
+    ['Autoridade competente', 'autoridadeCompetente', contratacao.responsavel],
+    ['Comissão julgadora', 'membroComissao', contratacao.membroComissao],
     ['Data da autorização', 'dataAutorizacaoAdesaoAtaRegPreco', contratacao.dataAutorizacaoAdesaoAtaRegPreco],
   ]
   const formaContratacao = formaContratacaoMapeada
@@ -316,7 +331,17 @@ export function montarCamposProcesso(p) {
   // com os membros, datas de recebimento/abertura dos envelopes, número da
   // chamada…) e que o GET `contratacao` devolve: entram os que vierem
   // preenchidos e ainda não aparecem acima, com o nome do campo da API.
-  const jaMostradas = new Set([...formaContratacaoMapeada.map(([, chave]) => chave), 'id', 'formaContratacaoDesc', 'modalidade', 'numeroSequencial', 'anoSequencial'])
+  const jaMostradas = new Set([
+    ...formaContratacaoMapeada.map(([, chave]) => chave),
+    'responsavel',
+    'id',
+    'entidade',
+    'processoAdministrativo',
+    'formaContratacaoDesc',
+    'modalidade',
+    'numeroSequencial',
+    'anoSequencial',
+  ])
   for (const [chave, valor] of Object.entries(contratacao)) {
     if (jaMostradas.has(chave) || valor == null || valor === '' || (Array.isArray(valor) && !valor.length)) continue
     formaContratacao.push({

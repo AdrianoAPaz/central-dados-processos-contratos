@@ -1275,7 +1275,11 @@ async function completarProcesso(sessao, processo, avisos) {
       const detalheContratacao = await resp.json()
       if (detalheContratacao && typeof detalheContratacao === 'object' && !Array.isArray(detalheContratacao)) {
         const base = completado.contratacao || processo.contratacao
-        completado.contratacao = { ...(base && typeof base === 'object' ? base : {}), ...detalheContratacao }
+        // O GET repete o processo inteiro dentro de `processoAdministrativo`;
+        // fora, pra não inflar o registro.
+        const resto = { ...detalheContratacao }
+        delete resto.processoAdministrativo
+        completado.contratacao = { ...(base && typeof base === 'object' ? base : {}), ...resto }
       }
     }
   } catch (e) {
