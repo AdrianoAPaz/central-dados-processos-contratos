@@ -359,6 +359,11 @@ export function montarSecoesInteracoesContabilidade(interacoes) {
         })
         continue
       }
+      // Campo monetário (`valor`): símbolo R$ + separadores pt-BR (1.234,56).
+      if (chave === 'valor' && valor != null && valor !== '' && !Number.isNaN(Number(valor))) {
+        campos.push({ label: formatarChave(chave), valor: `R$ ${formatarValor(valor)}` })
+        continue
+      }
       campos.push({ label: formatarChave(chave), valor: valorCampoDinamico(chave, valor, contexto) })
       // Campo extra "Despesa" logo após "Desdobramento" — pedido do usuário
       // (2026-09-22): o número da despesa (ex.: 291), não o id interno
