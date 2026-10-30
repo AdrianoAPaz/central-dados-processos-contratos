@@ -15,6 +15,7 @@ import {
   montarSecoesOutrasAlteracoes,
   montarDocumentoDespesas,
   montarTabelaItens,
+  montarTabelaHistoricoAnexos,
   montarTabelaResponsaveis,
   montarSecoesSolicitacoesFornecimento,
   montarSecoesInteracoesContabilidade,
@@ -209,6 +210,13 @@ export function finalizarDocumento(doc) {
   return doc.output('blob')
 }
 
+// Seção "Anexados por" (quem anexou cada arquivo e quando) — nada se não
+// houver anexo com autor/data. Devolve o cursor.
+function desenharAnexadosPor(doc, cursor, tabela) {
+  if (!tabela || !tabela.linhas.length) return cursor
+  return desenharTabelaDinamica(doc, desenharTitulo(doc, cursor, 'Anexados por'), tabela)
+}
+
 // PDF com os dados do contrato + itens do contrato — sem aditivos nem
 // solicitações de fornecimento (cada um vira o seu próprio documento).
 export function gerarPdfContrato(contrato) {
@@ -220,6 +228,8 @@ export function gerarPdfContrato(contrato) {
     cursor = desenharTitulo(doc, cursor, `Itens do contrato (${contrato.itens.length})`)
     cursor = desenharTabelaDinamica(doc, cursor, tabelaItens)
   }
+
+  cursor = desenharAnexadosPor(doc, cursor, montarTabelaHistoricoAnexos(contrato.arquivos))
 
   const tabelaResponsaveis = montarTabelaResponsaveis(contrato.responsaveis)
   if (tabelaResponsaveis.linhas.length) {
@@ -257,10 +267,11 @@ export function gerarPdfAditivo(secao) {
 
   if (secao.tabelaItens.linhas.length) {
     cursor = desenharTitulo(doc, cursor, 'Itens')
-    desenharTabelaDinamica(doc, cursor, secao.tabelaItens)
+    cursor = desenharTabelaDinamica(doc, cursor, secao.tabelaItens)
   } else {
     cursor = desenharAviso(doc, cursor, 'Sem itens vinculados')
   }
+  desenharAnexadosPor(doc, cursor, secao.tabelaHistoricoAnexos)
 
   return finalizarDocumento(doc)
 }
@@ -271,10 +282,11 @@ export function gerarPdfAditivo(secao) {
 // "Sem itens vinculados" que o aditivo mostra.
 export function gerarPdfApostilamento(secao) {
   const { doc, cursor: inicio } = novoDocumento(secao.titulo)
-  const cursor = desenharTabelaCampos(doc, inicio, secao.campos)
+  let cursor = desenharTabelaCampos(doc, inicio, secao.campos)
   if (secao.tabelaItens.linhas.length) {
-    desenharTabelaDinamica(doc, desenharTitulo(doc, cursor, 'Itens'), secao.tabelaItens)
+    cursor = desenharTabelaDinamica(doc, desenharTitulo(doc, cursor, 'Itens'), secao.tabelaItens)
   }
+  desenharAnexadosPor(doc, cursor, secao.tabelaHistoricoAnexos)
   return finalizarDocumento(doc)
 }
 
@@ -350,6 +362,7 @@ export function gerarPdfPublicacoes(documento) {
   for (const bloco of documento.blocos) {
     cursor = desenharTitulo(doc, cursor, bloco.titulo)
     cursor = desenharTabelaCampos(doc, cursor, bloco.campos)
+    cursor = desenharAnexadosPor(doc, cursor, bloco.tabelaHistoricoAnexos)
   }
   return finalizarDocumento(doc)
 }
@@ -382,10 +395,7 @@ export function gerarPdfTextos(documento) {
   for (const bloco of documento.blocos) {
     cursor = desenharTitulo(doc, cursor, bloco.titulo)
     cursor = desenharTabelaCampos(doc, cursor, bloco.campos)
-    if (bloco.tabelaHistoricoAnexos.linhas.length) {
-      cursor = desenharTitulo(doc, cursor, 'Anexados por')
-      cursor = desenharTabelaDinamica(doc, cursor, bloco.tabelaHistoricoAnexos)
-    }
+    cursor = desenharAnexadosPor(doc, cursor, bloco.tabelaHistoricoAnexos)
   }
   return finalizarDocumento(doc)
 }

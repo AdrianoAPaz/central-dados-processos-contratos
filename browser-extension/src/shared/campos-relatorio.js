@@ -270,7 +270,7 @@ function montarSecoesAlteracao(registros, rotulo) {
     const campos = camposDinamicos(demaisCampos, raw)
     const tabelaItens = montarTabelaItens(itens)
 
-    return { numero, titulo, campos, tabelaItens }
+    return { numero, titulo, campos, tabelaItens, tabelaHistoricoAnexos: montarTabelaHistoricoAnexos(raw && raw.arquivos) }
   })
 }
 
@@ -439,6 +439,7 @@ export function montarDocumentoPublicacoes(c) {
     titulo: tituloPublicacoes(c),
     blocos: publicacoes.map((raw, index) => ({
       titulo: `publicação ${index + 1}`,
+      tabelaHistoricoAnexos: montarTabelaHistoricoAnexos(raw && raw.arquivos),
       campos: camposDinamicos(raw, raw),
     })),
   }
@@ -492,7 +493,8 @@ export function montarDocumentoTextos(c) {
   }
 }
 
-// Quem anexou cada arquivo do texto e quando — o "Detalhes do anexo" do Betha
+// Quem anexou cada arquivo (do texto, do contrato, das alterações e das
+// publicações) e quando — o "Detalhes do anexo" do Betha
 // (confirmado ao vivo, 2026-10-30): vem inline em cada item de `arquivos`
 // como `usuarioCriacao` e `dhCriacao` ("2026-10-28 16:50:22.887"), sem
 // endpoint próprio de histórico.
