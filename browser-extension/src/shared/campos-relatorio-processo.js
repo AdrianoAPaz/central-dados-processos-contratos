@@ -658,6 +658,45 @@ export function numeroAta(raw, index) {
   return ano != null && ano !== '' && !String(numero).includes('/') ? `${numero}/${ano}` : String(numero)
 }
 
+// Quantidade com até 3 casas, sem zeros à direita ("6.295", "1.070,5").
+function formatarQuantidade(v) {
+  const n = Number(v)
+  if (v == null || v === '' || Number.isNaN(n)) return ''
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
+}
+
+// Itens da ata (`atasregistropreco/{id}/itens`), no formato visto em
+// 2026-10-30: o número do item e a unidade ficam aninhados
+// (`processoAdministrativoItemGerado.numero`, `material.unidadeCompra.simbolo`)
+// e o saldo/contratado no próprio item. Colunas da tela "Itens" da ata, mais o
+// contratado e o saldo — a tabela genérica deixava de fora o número e a unidade.
+export function montarTabelaItensAta(itens) {
+  if (!Array.isArray(itens) || !itens.length) return { colunas: [], linhas: [], omitidas: 0 }
+  const numeroDe = (it) => (it && it.processoAdministrativoItemGerado && it.processoAdministrativoItemGerado.numero) ?? ''
+  const ordenados = [...itens].sort((a, b) => Number(numeroDe(a)) - Number(numeroDe(b)))
+  const texto = (v) => (v == null ? '' : String(v))
+  return {
+    colunas: ['Item', 'Material', 'Marca', 'Unidade', 'Quantidade', 'Valor unitário (R$)', 'Valor total (R$)', 'Qtd. contratada', 'Saldo (qtd.)', 'Situação'],
+    linhas: ordenados.map((it) => {
+      const material = it.material && typeof it.material === 'object' ? it.material : {}
+      const unidade = material.unidadeCompra && typeof material.unidadeCompra === 'object' ? material.unidadeCompra.simbolo : ''
+      return [
+        texto(numeroDe(it)),
+        texto(material.descricao || (it.materialEspecificacao && it.materialEspecificacao.nome)),
+        texto(it.descricaoMarca),
+        texto(unidade),
+        formatarQuantidade(it.quantidade),
+        formatarValor(it.valorUnitario),
+        formatarValor(it.valorTotal),
+        formatarQuantidade(it.quantidadeContratada),
+        formatarQuantidade(it.valorSaldo),
+        texto(it.situacaoDesc || it.situacao),
+      ]
+    }),
+    omitidas: 0,
+  }
+}
+
 // CPF/CNPJ do fornecedor da ata: a lista de atas da tela mostra "NOME (CNPJ)",
 // mas o relatório só trazia o nome. O nome do campo na API não foi mapeado,
 // então tenta os lugares usuais; sem nenhum, não acrescenta o campo.
@@ -697,7 +736,7 @@ export function montarAtasRegistroPreco(p) {
       // Valores monetários da ata (ex.: valorTotalItens) saíam crus, sem
       // separadores nem R$ — formatados como "R$ 1.234,56".
       campos: camposAta(raw, p),
-      itens: montarTabelaGenerica(itens, COLUNAS_ITENS_EXCLUIDAS, p),
+      itens: montarTabelaItensAta(itens),
       ocorrencias: montarTabelaGenerica(Array.isArray(raw && raw.ocorrencias) ? raw.ocorrencias : [], [], p),
       tabelaAnexados: montarTabelaHistoricoAnexos(raw && raw.arquivos),
       anexos: (Array.isArray(raw && raw.arquivos) ? raw.arquivos : [])
