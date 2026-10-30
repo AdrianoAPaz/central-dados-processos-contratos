@@ -45,6 +45,52 @@ function valorProcesso(chave, valor, p) {
   return valorCampoDinamico(chave, valor, contextoProcesso(p))
 }
 
+// Rótulo de um cadastro aninhado do Betha ({ descricao } ou texto direto).
+function rotuloCadastro(v) {
+  if (v == null || v === '') return ''
+  return typeof v === 'object' ? String(v.descricao || v.nome || v.tipoDescricao || '') : String(v)
+}
+
+// Pessoa (autoridade, membro): "NOME (CPF)" ou "NOME (Papel)". Devolve ''
+// sem nenhum texto — quem chama segue pro JSON cru, pra análise manual.
+// Formato visto em /contratacao (2026-10-30): membro = { responsavel: { pessoa:
+// { nome, cpfCnpj } }, atribuicaoDesc }; autoridade = { pessoa: { nome, cpfCnpj } }.
+function descreverPessoa(o) {
+  if (!o || typeof o !== 'object') return rotuloCadastro(o)
+  const responsavel = o.responsavel && typeof o.responsavel === 'object' ? o.responsavel : o
+  const pessoa = responsavel.pessoa && typeof responsavel.pessoa === 'object' ? responsavel.pessoa : responsavel
+  const nome = pessoa.nome || o.nome || ''
+  if (!nome) return ''
+  // Membro mostra o papel (Pregoeiro, Membro/Equipe de apoio); a autoridade, o CPF.
+  const complemento = o.atribuicaoDesc || rotuloCadastro(o.atribuicao) || formatarCpfCnpj(pessoa.cpfCnpj || pessoa.cpf)
+  return complemento ? `${nome} (${complemento})` : String(nome)
+}
+
+function formatarCpfCnpj(valor) {
+  const d = String(valor || '').replace(/\D/g, '')
+  if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
+  if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5')
+  return d
+}
+
+// Comissão julgadora como na tela: "53 - Permanente - FULANO (Pregoeiro),
+// CICLANA (Membro/Equipe de apoio)". Sem membros, cai na pessoa/descrição.
+function descreverPessoasOuComissao(valor) {
+  if (Array.isArray(valor)) return valor.map(descreverPessoa).filter(Boolean).join(', ')
+  if (!valor || typeof valor !== 'object') return ''
+  // `membroComissao` = { comissaoLicitacao: { numero, tipoComissaoLicitacaoDesc, membros } }.
+  const comissao = valor.comissaoLicitacao && typeof valor.comissaoLicitacao === 'object' ? valor.comissaoLicitacao : valor
+  const membros = comissao.membros || comissao.integrantes || comissao.membrosComissao || comissao.pessoas
+  if (Array.isArray(membros) && membros.length) {
+    const cabecalho = [comissao.numero ?? comissao.codigo, comissao.tipoComissaoLicitacaoDesc || rotuloCadastro(comissao.tipo), comissao.descricao]
+      .filter((v) => v != null && v !== '')
+      .join(' - ')
+    const lista = membros.map(descreverPessoa).filter(Boolean).join(', ')
+    return cabecalho ? `${cabecalho} - ${lista}` : lista
+  }
+  return descreverPessoa(valor)
+}
+
 // Objetos do Compras que não têm descricao/nome e cairiam no JSON cru —
 // formatos vistos nos relatórios gerados pelo usuário (processos 229/2026 e
 // 623/2026, 2026-10-21). Devolve null quando o objeto não tem o dado
@@ -71,6 +117,16 @@ function valorObjetoProcesso(chave, valor, p) {
     const numero = valor.anoSequencial != null ? `${valor.numeroSequencial}/${valor.anoSequencial}` : String(valor.numeroSequencial)
     const modalidade = valor.modalidade && valor.modalidade.descricao
     return modalidade ? `${modalidade} ${numero}` : numero
+  }
+  // Comissão julgadora e autoridade competente (tela "Forma de contratação"):
+  // nome/descrição e, na comissão, os membros com o papel de cada um.
+  if (/comissao|autoridade/i.test(chave)) {
+    const texto = descreverPessoasOuComissao(valor)
+    if (texto) return texto
+  }
+  // Ata gerada a partir de uma ata cancelada: a tela mostra o número dela.
+  if (/^ataCancelada/i.test(chave) && valor.numeroAta != null) {
+    return valor.anoAta != null ? `${valor.numeroAta}/${valor.anoAta}` : String(valor.numeroAta)
   }
   // `atoFinalBO` do histórico: o ato final que gerou a mudança de status.
   if (/^atoFinal/i.test(chave) && (valor.tipoAtoDesc || valor.tipoAto)) return String(valor.tipoAtoDesc || valor.tipoAto)
@@ -113,8 +169,33 @@ function chaveExcluida(chave, excluir) {
 export const SUBRECURSOS_EM_TABELA = [
   { chave: 'itens', rotulo: 'Itens', excluir: COLUNAS_ITENS_EXCLUIDAS },
   { chave: 'lotes', rotulo: 'Lotes' },
-  { chave: 'participantes', rotulo: 'Participantes' },
+  { chave: 'participantes', rotulo: 'Participantes', montar: montarTabelaParticipantes },
+  { chave: 'entidadesparticipantes', rotulo: 'Entidades participantes' },
 ]
+
+// Tabela de participantes com as colunas da tela "Participantes" (formato visto
+// em 2026-10-30): a genérica cortava nas 8 primeiras chaves e deixava de fora o
+// "Local/Regional" (`sedeMpeDesc`, só vem para quem declarou MPE).
+function montarTabelaParticipantes(participantes, p) {
+  if (!Array.isArray(participantes) || !participantes.length) return { colunas: [], linhas: [], omitidas: 0 }
+  const texto = (v) => (v == null ? '' : String(v))
+  const simNao = (v) => (v == null ? '' : v ? 'Sim' : 'Não')
+  return {
+    colunas: ['Participante', 'CPF/CNPJ', 'Tipo de participação', 'Declaração MPE', 'Local/Regional', 'Situação da documentação', 'Credenciamento', 'Renunciou recurso', 'Possui proposta'],
+    linhas: participantes.map((r) => [
+      texto(r.nome || (r.fornecedor && r.fornecedor.pessoa && r.fornecedor.pessoa.nome)),
+      formatarCpfCnpj(r.cpfCnpj || (r.fornecedor && r.fornecedor.pessoa && r.fornecedor.pessoa.cpfCnpj)),
+      texto(r.tipoParticipacaoDesc || r.tipoParticipacao),
+      simNao(r.declaracaoMPE),
+      texto(r.sedeMpeDesc),
+      texto(r.situacaoDocumentacaoDesc || r.situacaoDocumentacao),
+      texto(valorProcesso('dhCredenciamento', r.dhCredenciamento, p)),
+      simNao(r.renunciouRecurso),
+      simNao(r.possuiProposta),
+    ]),
+    omitidas: 0,
+  }
+}
 
 // Sub-recursos que viram um DOCUMENTO próprio (um PDF cada), com todos os
 // campos de cada registro — mesmo princípio dos aditivos/solicitações do
@@ -125,10 +206,14 @@ export const SUBRECURSOS_EM_TABELA = [
 export const SUBRECURSOS_EM_DOCUMENTO = [
   { chave: 'pareceres', rotulo: 'pareceres', singular: 'parecer' },
   { chave: 'sessoesjulgamento', rotulo: 'sessões de julgamento', singular: 'sessão de julgamento' },
+  { chave: 'atassessao', rotulo: 'atas das sessões de julgamento', singular: 'ata da sessão' },
   { chave: 'atosfinais', rotulo: 'atos finais', singular: 'ato final' },
   { chave: 'despesas', rotulo: 'despesas', singular: 'despesa' },
   { chave: 'historico', rotulo: 'histórico', singular: 'registro' },
-  { chave: 'atas', rotulo: 'atas de registro de preços', singular: 'ata', ocultar: ['itensAta'] },
+  { chave: 'publicacoes', rotulo: 'publicações', singular: 'publicação' },
+  { chave: 'impugnacoes', rotulo: 'impugnações', singular: 'impugnação' },
+  { chave: 'documentosexigidos', rotulo: 'documentos exigidos', singular: 'documento exigido' },
+  { chave: 'atas', rotulo: 'atas de registro de preços', singular: 'ata', ocultar: ['itensAta', 'ocorrencias'] },
   { chave: 'textos', rotulo: 'textos', singular: 'texto', vazio: MENSAGEM_SEM_TEXTOS },
 ]
 
@@ -200,6 +285,10 @@ const CHAVES_PRINCIPAIS = new Set([
   'exercicio',
   'entidadeToken',
   'subrecursos',
+  // Forma de contratação (modalidade, fundamento, comissão, autoridade…) sai no
+  // relatório próprio (montarDocumentoFormaContratacao), não no do processo.
+  'contratacao',
+  'formaJulgamento',
 ])
 
 // Rótulos que a tela do Compras usa (formulário "Editando processo
@@ -216,6 +305,16 @@ const ROTULOS_PROCESSO = {
   controleSaldoDesc: 'Controlar saldo por (descrição)',
 }
 
+// Rótulos da tela "Forma de contratação" para campos do `contratacao` cujo
+// nome na API é diferente.
+const ROTULOS_CONTRATACAO = {
+  dataInicioRecebimentoEnvelope: 'Recebimento dos envelopes — início',
+  dataFinalRecebimentoEnvelope: 'Recebimento dos envelopes — fim',
+  dataAberturaEnvelope: 'Abertura dos envelopes',
+  dtFormaContratacao: 'Data da forma de contratação',
+  percentCotaReservada: 'Percentual de cota reservada',
+}
+
 // Tipo de objeto (tela: "Compras e Serviços"): objeto com descrição ou enum em
 // texto (ex.: COMPRAS_SERVICOS), que vira palavras.
 function descricaoTipoObjeto(tipoObjeto) {
@@ -228,35 +327,15 @@ function descricaoTipoObjeto(tipoObjeto) {
 }
 
 export function montarCamposProcesso(p) {
-  const contratacao = p.contratacao && typeof p.contratacao === 'object' ? p.contratacao : {}
   const principais = [
     { label: 'Número/Ano', valor: numeroProcesso(p) },
     { label: 'Situação', valor: p.situacaoDesc || p.situacao || '' },
-    // Na tela o campo "Modalidade" vem da contratação; "Tipo de objeto" é outro.
-    { label: 'Modalidade', valor: (contratacao.modalidade && contratacao.modalidade.descricao) || '' },
     { label: 'Tipo de objeto', valor: descricaoTipoObjeto(p.tipoObjeto) },
     { label: 'Objeto', valor: p.objeto || '' },
     { label: 'Data do processo', valor: formatarData(p.dataProcesso) },
     { label: 'Valor total dos itens (R$)', valor: formatarValor(p.valorTotalItens) },
     { label: 'Quantidade de itens', valor: p.quantidadeItens ?? subrecurso(p, 'itens').length },
   ]
-  // Tela "Forma de contratação" do processo: tipo, fundamento legal, registro
-  // de preço, autoridade competente, comissão e data da autorização, que o
-  // relatório só trazia como o número da contratação. Só entram os que vierem
-  // preenchidos (nomes dos campos vistos no objeto `contratacao`, 2026-10-29).
-  const formaContratacao = [
-    ['Forma de contratação (tipo)', contratacao.formaContratacaoDesc || contratacao.formaContratacao],
-    ['Fundamento legal', contratacao.fundamentacaoLegal],
-    ['Registro de preço', contratacao.registroPreco],
-    ['Modo de disputa', contratacao.modoDisputa],
-    ['Número da chamada pública', contratacao.numeroChamadaPublica],
-    ['Autoridade competente', contratacao.responsavel],
-    ['Comissão responsável', contratacao.membroComissao],
-    ['Data da autorização', contratacao.dataAutorizacaoAdesaoAtaRegPreco],
-  ]
-    .filter(([, valor]) => valor != null && valor !== '')
-    .map(([label, valor]) => ({ label, valor: typeof valor === 'boolean' ? (valor ? 'Sim' : 'Não') : valorProcesso('campo', valor, p) }))
-  principais.push(...formaContratacao)
   // Demais campos que a API devolveu (pedido do usuário no Contratos: "todas
   // as informações") — depois dos principais, na ordem em que vierem.
   const demais = Object.entries(p)
@@ -483,7 +562,133 @@ export function montarDocumentosSubrecursos(p) {
   const base = tituloProcesso(p)
   const participantes = montarDocumentoParticipantes(p)
   const demais = montarDocumentosDemais(p, base)
-  return participantes ? [participantes, ...demais] : demais
+  const formaContratacao = montarDocumentoFormaContratacao(p)
+  return participantes ? [formaContratacao, participantes, ...demais] : [formaContratacao, ...demais]
+}
+
+function textoSimNao(valor) {
+  return typeof valor === 'boolean' ? (valor ? 'Sim' : 'Não') : valor
+}
+
+// Dados de uma pessoa da tela "Forma de contratação" (autoridade ou membro da
+// comissão), formato visto em /contratacao (2026-10-30): responsavel.pessoa
+// { nome, cpfCnpj }, matricula, cargo { nome }, atribuicaoDesc.
+function detalhePessoaFormaContratacao(o) {
+  if (!o || typeof o !== 'object') return ''
+  const responsavel = o.responsavel && typeof o.responsavel === 'object' ? o.responsavel : o
+  const pessoa = responsavel.pessoa && typeof responsavel.pessoa === 'object' ? responsavel.pessoa : {}
+  const nome = pessoa.nome || o.nome || ''
+  if (!nome) return ''
+  const cpf = formatarCpfCnpj(pessoa.cpfCnpj || pessoa.cpf)
+  return [
+    nome,
+    o.atribuicaoDesc,
+    cpf && `CPF/CNPJ: ${cpf}`,
+    responsavel.matricula && `Matrícula: ${responsavel.matricula}`,
+    rotuloCadastro(responsavel.cargo) && `Cargo: ${rotuloCadastro(responsavel.cargo)}`,
+  ]
+    .filter(Boolean)
+    .join(' — ')
+}
+
+// Relatório próprio da forma de contratação ("forma de contratação processo adm
+// 7/2026"): os dados que a tela "Forma de contratação" mostra, na ordem da tela,
+// e depois TODOS os demais campos do GET `contratacao` (inclusive os vazios),
+// pra nada se perder; autoridade e comissão julgadora ganham blocos com o
+// detalhe de cada pessoa e do ato de designação.
+function montarDocumentoFormaContratacao(p) {
+  const c = p.contratacao && typeof p.contratacao === 'object' ? p.contratacao : {}
+  const numeroLicitacao =
+    c.numeroSequencial != null ? (c.anoSequencial != null ? `${c.numeroSequencial}/${c.anoSequencial}` : String(c.numeroSequencial)) : ''
+  const formaJulgamento = p.formaJulgamento || c.formaJulgamentoProcesso
+  const comissao = c.membroComissao && typeof c.membroComissao === 'object' ? c.membroComissao : {}
+  const dadosComissao = comissao.comissaoLicitacao && typeof comissao.comissaoLicitacao === 'object' ? comissao.comissaoLicitacao : {}
+  const ato = dadosComissao.ato && typeof dadosComissao.ato === 'object' ? dadosComissao.ato : {}
+
+  const mapeadas = [
+    ['Modalidade', rotuloCadastro(c.modalidade)],
+    ['Sigla da modalidade', c.modalidade && typeof c.modalidade === 'object' ? c.modalidade.sigla : ''],
+    ['Número da licitação', numeroLicitacao],
+    ['Forma de contratação (tipo)', c.formaContratacaoDesc || c.formaContratacao],
+    ['Fundamento legal', c.fundamentacaoLegal ? valorProcesso('fundamentacaoLegal', c.fundamentacaoLegal, p) : ''],
+    ['Registro de preço', textoSimNao(c.registroPreco)],
+    ['Forma de julgamento', formaJulgamento ? valorProcesso('formaJulgamento', formaJulgamento, p) : ''],
+    ['Modo de disputa', c.modoDisputa],
+    ['Número da chamada pública', c.numeroChamadaPublica],
+    ['Data da autorização', c.dataAutorizacaoAdesaoAtaRegPreco ? valorProcesso('dataAutorizacaoAdesaoAtaRegPreco', c.dataAutorizacaoAdesaoAtaRegPreco, p) : ''],
+    ['Autoridade competente', c.responsavel ? valorProcesso('autoridadeCompetente', c.responsavel, p) : ''],
+    ['Comissão julgadora', c.membroComissao ? valorProcesso('membroComissao', c.membroComissao, p) : ''],
+  ]
+  const tratadas = new Set([
+    'id',
+    'entidade',
+    'processoAdministrativo',
+    'modalidade',
+    'formaContratacao',
+    'formaContratacaoDesc',
+    'numeroSequencial',
+    'anoSequencial',
+    'fundamentacaoLegal',
+    'registroPreco',
+    'formaJulgamentoProcesso',
+    'modoDisputa',
+    'numeroChamadaPublica',
+    'dataAutorizacaoAdesaoAtaRegPreco',
+    'responsavel',
+    'membroComissao',
+  ])
+  const campos = mapeadas.map(([label, valor]) => ({ label, valor: valor == null ? '' : valor }))
+  for (const [chave, valor] of Object.entries(c)) {
+    if (tratadas.has(chave)) continue
+    campos.push({
+      label: ROTULOS_CONTRATACAO[chave] || formatarChave(chave),
+      valor: valor == null ? '' : textoSimNao(valorProcesso(chave, valor, p)),
+    })
+  }
+
+  const blocos = [{ titulo: 'forma de contratação', campos }]
+
+  const autoridade = detalhePessoaFormaContratacao(c.responsavel)
+  if (autoridade) {
+    const r = c.responsavel
+    blocos.push({
+      titulo: 'autoridade competente',
+      campos: [
+        { label: 'Autoridade', valor: autoridade },
+        { label: 'Tipo de pessoa', valor: r.tipo || (r.pessoa && r.pessoa.tipoPessoa) || '' },
+        { label: 'Responsável interno', valor: r.responsavelInterno == null ? '' : textoSimNao(r.responsavelInterno) },
+        { label: 'Ativo', valor: r.ativo == null ? '' : textoSimNao(r.ativo) },
+      ].filter((campo) => campo.valor !== ''),
+    })
+  }
+
+  if (c.membroComissao) {
+    const membros = Array.isArray(dadosComissao.membros) ? dadosComissao.membros : []
+    blocos.push({
+      titulo: 'comissão julgadora',
+      campos: [
+        { label: 'Número da comissão', valor: dadosComissao.numero ?? '' },
+        { label: 'Finalidade', valor: dadosComissao.finalidade || '' },
+        { label: 'Tipo da comissão', valor: dadosComissao.tipoComissaoLicitacaoDesc || dadosComissao.tipoComissaoLicitacao || '' },
+        { label: 'Data de expiração', valor: dadosComissao.dataExpiracao ? formatarData(dadosComissao.dataExpiracao) : '' },
+        { label: 'Data de exoneração', valor: dadosComissao.dataExoneracao ? formatarData(dadosComissao.dataExoneracao) : '' },
+        { label: 'Ato — número', valor: ato.numeroAto || '' },
+        { label: 'Ato — ementa', valor: ato.ementa || '' },
+        { label: 'Ato — data de publicação', valor: ato.dataPublicacao ? formatarData(ato.dataPublicacao) : '' },
+        { label: 'Ato — data de vigência', valor: ato.dataVigorar ? formatarData(ato.dataVigorar) : '' },
+        { label: 'Membro responsável', valor: detalhePessoaFormaContratacao(comissao) },
+        ...membros.map((m, i) => ({ label: `Membro ${i + 1}`, valor: detalhePessoaFormaContratacao(m) })),
+      ].filter((campo) => campo.valor !== '' && campo.valor != null),
+    })
+  }
+
+  return {
+    chave: 'formacontratacao',
+    titulo: `forma de contratação processo adm ${numeroProcesso(p)}`,
+    // Nome do arquivo (sem extensão), quando difere do título.
+    arquivo: `forma de contratação proc adm ${numeroProcesso(p)}`,
+    blocos,
+  }
 }
 
 function montarDocumentosDemais(p, base) {
@@ -494,12 +699,79 @@ function montarDocumentosDemais(p, base) {
       titulo: `${rotulo} do ${base}`,
       vazio,
       tabelaHistorico: chave === 'historico' ? montarTabelaHistoricoProcesso(registros, p) : null,
-      blocos: registros.map((raw, index) =>
-        chave === 'textos'
-          ? { titulo: tituloBlocoTexto(raw, index), campos: camposTextoProcesso(raw, p) }
-          : { titulo: `${singular} ${index + 1}`, campos: camposDe(raw, p, ocultar) },
-      ),
+      blocos: [
+        ...registros.map((raw, index) => {
+          if (chave === 'textos') return { titulo: tituloBlocoTexto(raw, index), campos: camposTextoProcesso(raw, p) }
+          if (chave === 'atassessao') return { titulo: `${singular} ${index + 1}`, campos: camposAtaSessao(raw, p) }
+          const campos = camposDe(raw, p, ocultar)
+          if (chave === 'sessoesjulgamento') campos.push(...camposDetalheSessao(raw, p))
+          return { titulo: `${singular} ${index + 1}`, campos }
+        }),
+        ...(chave === 'despesas' ? blocoResumoDespesas(registros, p) : []),
+      ],
     }))
+}
+
+function tamanhoArquivo(bytes) {
+  const n = Number(bytes)
+  if (!n || Number.isNaN(n)) return ''
+  return n >= 1048576 ? `${(n / 1048576).toFixed(1).replace('.', ',')} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
+}
+
+// Ata da sessão de julgamento (`sessoesjulgamento/atasprocesso`, formato visto
+// em 2026-10-30): sequencial, tipo da ata, texto (HTML do editor) e arquivos;
+// a sessão vem aninhada com membros e andamento, que ficam de fora daqui (o
+// documento de sessões os mostra).
+function camposAtaSessao(raw, p) {
+  const sessao = raw && raw.sessaoJulgamento && typeof raw.sessaoJulgamento === 'object' ? raw.sessaoJulgamento : {}
+  const tipoSessao = rotuloCadastro(sessao.tipoSessaoJulgamento)
+  const arquivos = (Array.isArray(raw && raw.arquivos) ? raw.arquivos : [])
+    .map((a) => [a.nome, tamanhoArquivo(a.tamanho)].filter(Boolean).join(' — '))
+    .filter(Boolean)
+    .join('; ')
+  return [
+    { label: 'Sequencial', valor: raw && raw.sequencial != null ? raw.sequencial : '' },
+    { label: 'Tipo da ata', valor: rotuloCadastro(raw && raw.tipoAta) },
+    { label: 'Sessão', valor: [sessao.numeroSessao, tipoSessao].filter((v) => v != null && v !== '').join(' - ') },
+    { label: 'Situação da sessão', valor: sessao.situacaoAtualDesc || '' },
+    { label: 'Texto da ata', valor: raw && raw.textoAta ? conteudoTexto(raw.textoAta) : '' },
+    { label: 'Arquivos', valor: arquivos },
+  ].filter((campo) => campo.valor !== '' && campo.valor != null)
+}
+
+// Membros e andamento da sessão de julgamento, que a lista de sessões traz
+// vazios: vêm da sessão aninhada nas atas (`atassessao`), ligada pelo id.
+function camposDetalheSessao(sessao, p) {
+  const ata = subrecurso(p, 'atassessao').find((a) => a && a.sessaoJulgamento && String(a.sessaoJulgamento.id) === String(sessao && sessao.id))
+  const detalhe = ata && ata.sessaoJulgamento
+  if (!detalhe) return []
+  const membros = (detalhe.sessaoJulgamentoMembro || []).map((m) => descreverPessoa(m.comissaoLicitacaoMembro)).filter(Boolean).join(', ')
+  const andamento = (detalhe.sessaoJulgamentoAndamento || [])
+    .map((a) => [valorProcesso('dataHoraAndamento', a.dataHoraAndamento, p), a.situacaoAndamentoDesc || a.situacao].filter(Boolean).join(' - '))
+    .filter(Boolean)
+    .join('; ')
+  return [
+    { label: 'Membros da sessão', valor: membros },
+    { label: 'Andamento da sessão', valor: andamento },
+  ].filter((campo) => campo.valor)
+}
+
+// Rodapé da tela "Despesas": saldo remanescente (soma do valor estimado das
+// despesas), total estimado dos itens e a diferença entre os dois.
+function blocoResumoDespesas(despesas, p) {
+  const soma = despesas.reduce((total, d) => total + (Number(d && d.valorEstimado) || 0), 0)
+  const totalItens = Number(p && p.valorTotalItens)
+  if (!despesas.length || Number.isNaN(totalItens)) return []
+  return [
+    {
+      titulo: 'resumo das despesas',
+      campos: [
+        { label: 'Saldo remanescente', valor: `R$ ${formatarValor(soma)}` },
+        { label: 'Total estimado dos itens', valor: `R$ ${formatarValor(totalItens)}` },
+        { label: 'Diferença', valor: `R$ ${formatarValor(soma - totalItens)}` },
+      ],
+    },
+  ]
 }
 
 // Atas de registro de preço — pasta própria no zip do processo (pedido do
@@ -544,6 +816,73 @@ export function numeroAta(raw, index) {
   return ano != null && ano !== '' && !String(numero).includes('/') ? `${numero}/${ano}` : String(numero)
 }
 
+// Quantidade com até 3 casas, sem zeros à direita ("6.295", "1.070,5").
+function formatarQuantidade(v) {
+  const n = Number(v)
+  if (v == null || v === '' || Number.isNaN(n)) return ''
+  return n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
+}
+
+// Itens da ata (`atasregistropreco/{id}/itens`), no formato visto em
+// 2026-10-30: o número do item e a unidade ficam aninhados
+// (`processoAdministrativoItemGerado.numero`, `material.unidadeCompra.simbolo`)
+// e o saldo/contratado no próprio item. Colunas da tela "Itens" da ata, mais o
+// contratado e o saldo — a tabela genérica deixava de fora o número e a unidade.
+export function montarTabelaItensAta(itens) {
+  if (!Array.isArray(itens) || !itens.length) return { colunas: [], linhas: [], omitidas: 0 }
+  const numeroDe = (it) => (it && it.processoAdministrativoItemGerado && it.processoAdministrativoItemGerado.numero) ?? ''
+  const ordenados = [...itens].sort((a, b) => Number(numeroDe(a)) - Number(numeroDe(b)))
+  const texto = (v) => (v == null ? '' : String(v))
+  return {
+    colunas: ['Item', 'Material', 'Marca', 'Unidade', 'Quantidade', 'Valor unitário (R$)', 'Valor total (R$)', 'Qtd. contratada', 'Saldo (qtd.)', 'Situação'],
+    linhas: ordenados.map((it) => {
+      const material = it.material && typeof it.material === 'object' ? it.material : {}
+      const unidade = material.unidadeCompra && typeof material.unidadeCompra === 'object' ? material.unidadeCompra.simbolo : ''
+      return [
+        texto(numeroDe(it)),
+        texto(material.descricao || (it.materialEspecificacao && it.materialEspecificacao.nome)),
+        texto(it.descricaoMarca),
+        texto(unidade),
+        formatarQuantidade(it.quantidade),
+        formatarValor(it.valorUnitario),
+        formatarValor(it.valorTotal),
+        formatarQuantidade(it.quantidadeContratada),
+        formatarQuantidade(it.valorSaldo),
+        texto(it.situacaoDesc || it.situacao),
+      ]
+    }),
+    omitidas: 0,
+  }
+}
+
+// CPF/CNPJ do fornecedor da ata: a lista de atas da tela mostra "NOME (CNPJ)",
+// mas o relatório só trazia o nome. O nome do campo na API não foi mapeado,
+// então tenta os lugares usuais; sem nenhum, não acrescenta o campo.
+function documentoFornecedor(raw) {
+  const f = raw && raw.fornecedor && typeof raw.fornecedor === 'object' ? raw.fornecedor : {}
+  const pessoa = f.pessoa && typeof f.pessoa === 'object' ? f.pessoa : {}
+  const doc = pessoa.cpfCnpj || pessoa.cnpj || pessoa.cpf || f.cpfCnpj || f.cnpj || f.cpf || raw.cpfCnpjFornecedor || ''
+  // Formato visto em `atasregistropreco` (2026-10-30): fornecedor.pessoa.cpfCnpj,
+  // só dígitos ("59783143000160") — a tela mostra "59.783.143/0001-60".
+  return doc ? formatarCpfCnpj(doc) : ''
+}
+
+// Campos da ata na ordem da API, com valores monetários formatados
+// ("R$ 1.234,56") e o CPF/CNPJ do fornecedor logo depois dele.
+function camposAta(raw, p) {
+  const chaves = Object.keys(raw || {}).filter((k) => k !== 'itensAta' && k !== 'ocorrencias')
+  const documento = documentoFornecedor(raw)
+  const campos = []
+  chaves.forEach((chave) => {
+    const valor = raw[chave]
+    const texto = valorProcesso(chave, valor, p)
+    const monetario = ehChaveMonetaria(chave) && valor != null && valor !== '' && !Number.isNaN(Number(valor))
+    campos.push({ label: formatarChave(chave), valor: monetario ? `R$ ${formatarValor(valor)}` : texto })
+    if (chave === 'fornecedor' && documento) campos.push({ label: 'CPF/CNPJ do fornecedor', valor: documento })
+  })
+  return campos
+}
+
 // Uma entrada por ata: título do PDF, campos (todos os que a API devolveu),
 // tabela dos itens da ata (`itensAta`, ver completarAtasProcesso no
 // service-worker.js) e os anexos (`arquivos` inline ou do GET da ata).
@@ -556,14 +895,9 @@ export function montarAtasRegistroPreco(p) {
       titulo: `ata ${numero} do ${tituloProcesso(p)}`,
       // Valores monetários da ata (ex.: valorTotalItens) saíam crus, sem
       // separadores nem R$ — formatados como "R$ 1.234,56".
-      campos: camposDe(raw, p, ['itensAta']).map((campo, i) => {
-        const chave = Object.keys(raw || {}).filter((k) => k !== 'itensAta')[i]
-        const valor = raw[chave]
-        return ehChaveMonetaria(chave) && valor != null && valor !== '' && !Number.isNaN(Number(valor))
-          ? { ...campo, valor: `R$ ${formatarValor(valor)}` }
-          : campo
-      }),
-      itens: montarTabelaGenerica(itens, COLUNAS_ITENS_EXCLUIDAS, p),
+      campos: camposAta(raw, p),
+      itens: montarTabelaItensAta(itens),
+      ocorrencias: montarTabelaGenerica(Array.isArray(raw && raw.ocorrencias) ? raw.ocorrencias : [], [], p),
       tabelaAnexados: montarTabelaHistoricoAnexos(raw && raw.arquivos),
       anexos: (Array.isArray(raw && raw.arquivos) ? raw.arquivos : [])
         .map((a) => ({ ...a, origem: `Ata ${numero}` }))

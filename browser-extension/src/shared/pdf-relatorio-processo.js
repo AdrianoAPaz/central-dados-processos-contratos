@@ -32,11 +32,11 @@ export function gerarPdfProcesso(processo) {
   const { doc, cursor: inicio } = novoDocumento(tituloProcesso(processo))
   let cursor = desenharTabelaCampos(doc, inicio, montarCamposProcesso(processo))
 
-  for (const { chave, rotulo, excluir } of SUBRECURSOS_EM_TABELA) {
+  for (const { chave, rotulo, excluir, montar } of SUBRECURSOS_EM_TABELA) {
     const registros = subrecurso(processo, chave)
     if (!registros.length) continue
 
-    const tabela = montarTabelaGenerica(registros, excluir, processo)
+    const tabela = montar ? montar(registros, processo) : montarTabelaGenerica(registros, excluir, processo)
     cursor = desenharTitulo(doc, cursor, `${rotulo} (${registros.length})`)
     cursor = desenharTabelaDinamica(doc, cursor, tabela)
 
@@ -90,7 +90,7 @@ export function listarDocumentosProcesso(processo) {
   const documentos = [{ nome: `${slug(tituloProcesso(processo))}.pdf`, gerar: () => gerarPdfProcesso(processo) }]
   for (const documento of montarDocumentosSubrecursos(processo)) {
     if (documento.chave === 'atas' || documento.chave === 'participantes') continue
-    documentos.push({ nome: `${slug(documento.titulo)}.pdf`, gerar: () => gerarPdfSubrecurso(documento) })
+    documentos.push({ nome: `${slug(documento.arquivo || documento.titulo)}.pdf`, gerar: () => gerarPdfSubrecurso(documento) })
   }
   return documentos
 }
@@ -132,6 +132,11 @@ export function gerarPdfAta(ata) {
     cursor = desenharTitulo(doc, cursor, `Itens da ata (${ata.itens.linhas.length})`)
     cursor = desenharTabelaDinamica(doc, cursor, ata.itens)
     cursor = desenharAvisoOmitidas(doc, cursor, ata.itens.omitidas)
+  }
+  if (ata.ocorrencias && ata.ocorrencias.linhas.length) {
+    cursor = desenharTitulo(doc, cursor, `Ocorrências da ata (${ata.ocorrencias.linhas.length})`)
+    cursor = desenharTabelaDinamica(doc, cursor, ata.ocorrencias)
+    cursor = desenharAvisoOmitidas(doc, cursor, ata.ocorrencias.omitidas)
   }
   desenharTabelaAnexados(doc, cursor, ata.tabelaAnexados)
   return finalizarDocumento(doc)

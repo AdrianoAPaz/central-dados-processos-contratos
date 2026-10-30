@@ -1002,6 +1002,11 @@ async function buscarProcessos(numero, ano) {
 // processos não têm todos os sub-recursos). Mesmo envelope paginado do
 // Betha, throttle entre páginas como nos demais.
 async function buscarSubrecursoProcesso(sessao, processoId, subrecurso) {
+  return buscarListaPaginada(sessao, `${ENDPOINT_PROCESSOS}/${limparId(processoId)}/${subrecurso}`)
+}
+
+// Lista paginada de qualquer recurso do Compras (caminho relativo à API).
+async function buscarListaPaginada(sessao, caminho) {
   const PAGINA = 100
   const MAX = 500
   const registros = []
@@ -1009,7 +1014,7 @@ async function buscarSubrecursoProcesso(sessao, processoId, subrecurso) {
   let hasNext = true
 
   while (hasNext && registros.length < MAX) {
-    const resp = await getCompras(sessao, `${ENDPOINT_PROCESSOS}/${limparId(processoId)}/${subrecurso}`, {
+    const resp = await getCompras(sessao, caminho, {
       offset: String(offset),
       limit: String(PAGINA),
     })
@@ -1032,10 +1037,14 @@ async function buscarSubrecursoProcesso(sessao, processoId, subrecurso) {
 // `arquivos` inline ou só no GET do texto individual). Mesma regra do Delta
 // Intelligence (`_coletarAnexosDeTextos`); sequencial pra não rajar a API.
 // `textos` já vem completo por completarTextosProcesso.
-function coletarAnexosProcesso(arquivosInline, textos) {
+function coletarAnexosProcesso(arquivosInline, textos, atasSessao = []) {
   const anexos = Array.isArray(arquivosInline) ? [...arquivosInline] : []
   for (const texto of textos) {
     if (texto && Array.isArray(texto.arquivos)) anexos.push(...texto.arquivos)
+  }
+  // Arquivos das atas das sessões de julgamento (ex.: AtaTotal_…pdf).
+  for (const ata of atasSessao) {
+    if (ata && Array.isArray(ata.arquivos)) anexos.push(...ata.arquivos)
   }
   return anexos
 }
@@ -1083,11 +1092,14 @@ async function completarAtasProcesso(sessao, processoId, atas) {
       completa = { ...completa, ...(detalhe || {}) }
       if (!Array.isArray(completa.arquivos)) completa.arquivos = []
     }
-    completa.itensAta = await buscarSubrecursoProcesso(
-      sessao,
-      processoId,
-      `${SUBRECURSOS_PROCESSO.atas}/${limparId(ata.id)}/itens`,
-    ).catch(() => [])
+    // Os itens da ata ficam num recurso próprio da API, fora do processo:
+    // `atasregistropreco/{id}/itens` (caminho visto na tela da ata,
+    // 2026-10-30). O caminho antigo, sob `processosadministrativo/{id}/`,
+    // não existe — por isso o relatório saía sem itens.
+    completa.itensAta = await buscarListaPaginada(sessao, `${SUBRECURSOS_PROCESSO.atas}/${limparId(ata.id)}/itens`).catch(() => [])
+    // Ocorrências da ata (tela "Ocorrências"); caminho não confirmado — falha
+    // deixa a lista vazia.
+    completa.ocorrencias = await buscarListaPaginada(sessao, `${SUBRECURSOS_PROCESSO.atas}/${limparId(ata.id)}/ocorrencias`).catch(() => [])
     completas.push(completa)
   }
   return completas
@@ -1258,6 +1270,26 @@ async function completarProcesso(sessao, processo, avisos) {
     avisos.push(`detalhe do processo: ${String((e && e.message) || e)}`)
   }
 
+  // Tela "Forma de contratação": o GET `processosadministrativo/{id}/contratacao`
+  // traz autoridade competente, comissão julgadora, datas dos envelopes etc.,
+  // que o `contratacao` da listagem não tem. Mescla por cima do que já veio.
+  try {
+    const resp = await getCompras(sessao, `${ENDPOINT_PROCESSOS}/${limparId(processo.id)}/contratacao`)
+    if (resp.ok) {
+      const detalheContratacao = await resp.json()
+      if (detalheContratacao && typeof detalheContratacao === 'object' && !Array.isArray(detalheContratacao)) {
+        const base = completado.contratacao || processo.contratacao
+        // O GET repete o processo inteiro dentro de `processoAdministrativo`;
+        // fora, pra não inflar o registro.
+        const resto = { ...detalheContratacao }
+        delete resto.processoAdministrativo
+        completado.contratacao = { ...(base && typeof base === 'object' ? base : {}), ...resto }
+      }
+    }
+  } catch (e) {
+    avisos.push(`forma de contratação: ${String((e && e.message) || e)}`)
+  }
+
   const cache = new Map()
   for (const [chave, recurso] of Object.entries(CADASTROS_DO_PROCESSO)) {
     const atual = completado[chave] !== undefined ? completado[chave] : processo[chave]
@@ -1335,7 +1367,7 @@ async function buscarDetalhesProcesso(processoId, arquivosInline, processo) {
   }
 
   try {
-    subrecursos.anexos = coletarAnexosProcesso(arquivosInline, subrecursos.textos || [])
+    subrecursos.anexos = coletarAnexosProcesso(arquivosInline, subrecursos.textos || [], subrecursos.atassessao || [])
   } catch (e) {
     subrecursos.anexos = []
     avisos.push(`anexos: ${String((e && e.message) || e)}`)

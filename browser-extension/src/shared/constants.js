@@ -44,6 +44,15 @@ export const SUBRECURSOS_PROCESSO = {
   participantes: 'participantes',
   textos: 'textos',
   atas: 'atasregistropreco',
+  // Telas do menu "Ações" do processo no Compras (caminhos vistos nas
+  // chamadas da própria tela, 2026-10-30). Só entram no relatório quando
+  // têm registros.
+  // Atas das sessões de julgamento (array simples, com a sessão aninhada).
+  atassessao: 'sessoesjulgamento/atasprocesso',
+  entidadesparticipantes: 'entidadesparticipantes',
+  publicacoes: 'publicacoes',
+  impugnacoes: 'impugnacoes',
+  documentosexigidos: 'documentos',
 }
 
 export const STORAGE_KEYS = {
