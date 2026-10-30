@@ -208,6 +208,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  // Histórico de UM arquivo anexado a um texto da contratação (menu "⋮" do
+  // anexo no Betha: quem anexou e quando). Caminho ainda NÃO confirmado ao
+  // vivo — segue o padrão dos demais históricos (.../{id}/historico).
+  // Best-effort: erro vira anexo sem histórico, não trava o relatório.
+  if (message.type === 'buscar-historico-arquivo-texto') {
+    buscarSubrecurso(
+      `${ENDPOINT_CONTRATACOES}/${limparId(message.contratoId)}/textos/${limparId(message.textoId)}/arquivos/${limparId(message.arquivoId)}/historico`,
+    )
+      .then((historico) => sendResponse({ historico }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
   // Itens de UM recebimento específico. Endpoint confirmado ao vivo pelo
   // usuário (2026-09-17), ver buscarItensRecebimento abaixo.
   if (message.type === 'buscar-itens-recebimento') {

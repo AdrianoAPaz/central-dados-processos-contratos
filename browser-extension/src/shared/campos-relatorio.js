@@ -484,8 +484,35 @@ export function montarDocumentoTextos(c) {
   const contexto = { entidades: indexarEntidades(c) }
   return {
     titulo: tituloTextos(c),
-    blocos: textos.map((raw, index) => ({ titulo: tituloBlocoTexto(raw, index), campos: camposTexto(raw, contexto) })),
+    blocos: textos.map((raw, index) => ({
+      titulo: tituloBlocoTexto(raw, index),
+      campos: camposTexto(raw, contexto),
+      tabelaHistoricoAnexos: montarTabelaHistoricoAnexos(raw && raw.arquivos),
+    })),
   }
+}
+
+// Histórico dos arquivos anexados ao texto (menu "⋮" do anexo no Betha): quem
+// anexou e quando, uma linha por registro de histórico de cada arquivo.
+export function montarTabelaHistoricoAnexos(arquivos) {
+  const linhas = []
+  for (const arquivo of Array.isArray(arquivos) ? arquivos : []) {
+    const historico = Array.isArray(arquivo && arquivo.historico) ? arquivo.historico : []
+    const dataHora = (h) => (h && (h.dataHoraCriacao || h.dhHistorico || h.dataHora)) || ''
+    const ordenados = [...historico].sort((a, b) => String(dataHora(a)).localeCompare(String(dataHora(b))))
+    for (const h of ordenados) {
+      const usuario = h && h.usuario
+      linhas.push([
+        valorTexto(arquivo.nome),
+        (usuario && (usuario.nome || usuario.id)) || '',
+        formatarDataHora(dataHora(h)),
+        valorTexto(h && (h.situacaoDesc || h.situacao || h.acaoDesc || h.acao)),
+      ])
+    }
+  }
+  return linhas.length
+    ? { colunas: ['Arquivo', 'Anexado por', 'Data/hora', 'Situação'], linhas }
+    : { colunas: [], linhas: [] }
 }
 
 // "texto 1 — Termo de Referência": o `titulo` do próprio texto, quando houver

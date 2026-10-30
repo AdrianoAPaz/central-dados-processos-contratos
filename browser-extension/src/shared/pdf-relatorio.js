@@ -382,6 +382,10 @@ export function gerarPdfTextos(documento) {
   for (const bloco of documento.blocos) {
     cursor = desenharTitulo(doc, cursor, bloco.titulo)
     cursor = desenharTabelaCampos(doc, cursor, bloco.campos)
+    if (bloco.tabelaHistoricoAnexos.linhas.length) {
+      cursor = desenharTitulo(doc, cursor, 'Histórico dos anexos')
+      cursor = desenharTabelaDinamica(doc, cursor, bloco.tabelaHistoricoAnexos)
+    }
   }
   return finalizarDocumento(doc)
 }
