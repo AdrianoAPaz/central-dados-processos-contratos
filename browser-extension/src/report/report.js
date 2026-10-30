@@ -6,6 +6,7 @@ import {
   montarSecoesSuspensoes,
   montarSecoesOutrasAlteracoes,
   montarTabelaItens,
+  montarTabelaHistoricoAnexos,
   montarTabelaResponsaveis,
   montarSecoesSolicitacoesFornecimento,
   montarSecoesInteracoesContabilidade,
@@ -57,6 +58,17 @@ async function montarPacoteRelatorio(contrato, anexos, container) {
   container.appendChild(resumo)
 }
 
+// Tabela "Anexados por" (quem anexou cada arquivo e quando) — nada se não
+// houver anexo com autor/data.
+function adicionarAnexadosPor(container, tabela) {
+  const tabelaDom = criarTabelaDinamica(tabela)
+  if (!tabelaDom) return
+  const h4 = document.createElement('h4')
+  h4.textContent = formatarTitulo('Anexados por')
+  container.appendChild(h4)
+  container.appendChild(tabelaDom)
+}
+
 async function carregar() {
   const stored = await chrome.storage.local.get(STORAGE_KEY)
   const contrato = stored[STORAGE_KEY]
@@ -78,6 +90,9 @@ async function carregar() {
     containerItensContrato.appendChild(titulo)
     containerItensContrato.appendChild(tabelaItensContrato)
   }
+
+  // Quem anexou cada arquivo do contrato e quando.
+  adicionarAnexadosPor(containerItensContrato, montarTabelaHistoricoAnexos(contrato.arquivos))
 
   // Responsáveis do contrato (fiscal, gestor etc.) — seção própria com nome,
   // tipo e período de cada um, em vez de um campo único na tabela principal.
@@ -124,6 +139,7 @@ async function carregar() {
         semItens.textContent = `Aditivo ${secao.numero} sem itens vinculados`
         bloco.appendChild(semItens)
       }
+      adicionarAnexadosPor(bloco, secao.tabelaHistoricoAnexos)
 
       container.appendChild(bloco)
     }
@@ -157,6 +173,7 @@ async function carregar() {
 
       const tabelaItens = criarTabelaDinamica(secao.tabelaItens)
       if (tabelaItens) bloco.appendChild(tabelaItens)
+      adicionarAnexadosPor(bloco, secao.tabelaHistoricoAnexos)
 
       container.appendChild(bloco)
     }
@@ -305,6 +322,7 @@ async function carregar() {
     h3.textContent = formatarTitulo(bloco.titulo)
     div.appendChild(h3)
     div.appendChild(criarTabelaCampos(bloco.campos))
+    adicionarAnexadosPor(div, bloco.tabelaHistoricoAnexos)
     containerPublicacoes.appendChild(div)
   }
 
@@ -354,13 +372,7 @@ async function carregar() {
     h3.textContent = formatarTitulo(bloco.titulo)
     div.appendChild(h3)
     div.appendChild(criarTabelaCampos(bloco.campos))
-    const tabelaHistoricoAnexos = criarTabelaDinamica(bloco.tabelaHistoricoAnexos)
-    if (tabelaHistoricoAnexos) {
-      const h4 = document.createElement('h4')
-      h4.textContent = formatarTitulo('Anexados por')
-      div.appendChild(h4)
-      div.appendChild(tabelaHistoricoAnexos)
-    }
+    adicionarAnexadosPor(div, bloco.tabelaHistoricoAnexos)
     containerTextos.appendChild(div)
   }
 
