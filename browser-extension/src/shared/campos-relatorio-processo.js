@@ -285,6 +285,10 @@ const CHAVES_PRINCIPAIS = new Set([
   'exercicio',
   'entidadeToken',
   'subrecursos',
+  // Forma de contratação (modalidade, fundamento, comissão, autoridade…) sai no
+  // relatório próprio (montarDocumentoFormaContratacao), não no do processo.
+  'contratacao',
+  'formaJulgamento',
 ])
 
 // Rótulos que a tela do Compras usa (formulário "Editando processo
@@ -323,58 +327,15 @@ function descricaoTipoObjeto(tipoObjeto) {
 }
 
 export function montarCamposProcesso(p) {
-  const contratacao = p.contratacao && typeof p.contratacao === 'object' ? p.contratacao : {}
   const principais = [
     { label: 'Número/Ano', valor: numeroProcesso(p) },
     { label: 'Situação', valor: p.situacaoDesc || p.situacao || '' },
-    // Na tela o campo "Modalidade" vem da contratação; "Tipo de objeto" é outro.
-    { label: 'Modalidade', valor: (contratacao.modalidade && contratacao.modalidade.descricao) || '' },
     { label: 'Tipo de objeto', valor: descricaoTipoObjeto(p.tipoObjeto) },
     { label: 'Objeto', valor: p.objeto || '' },
     { label: 'Data do processo', valor: formatarData(p.dataProcesso) },
     { label: 'Valor total dos itens (R$)', valor: formatarValor(p.valorTotalItens) },
     { label: 'Quantidade de itens', valor: p.quantidadeItens ?? subrecurso(p, 'itens').length },
   ]
-  // Tela "Forma de contratação" do processo: tipo, fundamento legal, registro
-  // de preço, autoridade competente, comissão e data da autorização, que o
-  // relatório só trazia como o número da contratação. Só entram os que vierem
-  // preenchidos (nomes dos campos vistos no objeto `contratacao`, 2026-10-29).
-  const formaContratacaoMapeada = [
-    ['Forma de contratação (tipo)', 'formaContratacao', contratacao.formaContratacaoDesc || contratacao.formaContratacao],
-    ['Fundamento legal', 'fundamentacaoLegal', contratacao.fundamentacaoLegal],
-    ['Registro de preço', 'registroPreco', contratacao.registroPreco],
-    ['Modo de disputa', 'modoDisputa', contratacao.modoDisputa],
-    ['Número da chamada pública', 'numeroChamadaPublica', contratacao.numeroChamadaPublica],
-    ['Autoridade competente', 'autoridadeCompetente', contratacao.responsavel],
-    ['Comissão julgadora', 'membroComissao', contratacao.membroComissao],
-    ['Data da autorização', 'dataAutorizacaoAdesaoAtaRegPreco', contratacao.dataAutorizacaoAdesaoAtaRegPreco],
-  ]
-  const formaContratacao = formaContratacaoMapeada
-    .filter(([, , valor]) => valor != null && valor !== '')
-    .map(([label, chave, valor]) => ({ label, valor: typeof valor === 'boolean' ? (valor ? 'Sim' : 'Não') : valorProcesso(chave, valor, p) }))
-  // Demais dados que a tela "Forma de contratação" mostra (comissão julgadora
-  // com os membros, datas de recebimento/abertura dos envelopes, número da
-  // chamada…) e que o GET `contratacao` devolve: entram os que vierem
-  // preenchidos e ainda não aparecem acima, com o nome do campo da API.
-  const jaMostradas = new Set([
-    ...formaContratacaoMapeada.map(([, chave]) => chave),
-    'responsavel',
-    'id',
-    'entidade',
-    'processoAdministrativo',
-    'formaContratacaoDesc',
-    'modalidade',
-    'numeroSequencial',
-    'anoSequencial',
-  ])
-  for (const [chave, valor] of Object.entries(contratacao)) {
-    if (jaMostradas.has(chave) || valor == null || valor === '' || (Array.isArray(valor) && !valor.length)) continue
-    formaContratacao.push({
-      label: ROTULOS_CONTRATACAO[chave] || formatarChave(chave),
-      valor: typeof valor === 'boolean' ? (valor ? 'Sim' : 'Não') : valorProcesso(chave, valor, p),
-    })
-  }
-  principais.push(...formaContratacao)
   // Demais campos que a API devolveu (pedido do usuário no Contratos: "todas
   // as informações") — depois dos principais, na ordem em que vierem.
   const demais = Object.entries(p)
@@ -601,7 +562,131 @@ export function montarDocumentosSubrecursos(p) {
   const base = tituloProcesso(p)
   const participantes = montarDocumentoParticipantes(p)
   const demais = montarDocumentosDemais(p, base)
-  return participantes ? [participantes, ...demais] : demais
+  const formaContratacao = montarDocumentoFormaContratacao(p)
+  return participantes ? [formaContratacao, participantes, ...demais] : [formaContratacao, ...demais]
+}
+
+function textoSimNao(valor) {
+  return typeof valor === 'boolean' ? (valor ? 'Sim' : 'Não') : valor
+}
+
+// Dados de uma pessoa da tela "Forma de contratação" (autoridade ou membro da
+// comissão), formato visto em /contratacao (2026-10-30): responsavel.pessoa
+// { nome, cpfCnpj }, matricula, cargo { nome }, atribuicaoDesc.
+function detalhePessoaFormaContratacao(o) {
+  if (!o || typeof o !== 'object') return ''
+  const responsavel = o.responsavel && typeof o.responsavel === 'object' ? o.responsavel : o
+  const pessoa = responsavel.pessoa && typeof responsavel.pessoa === 'object' ? responsavel.pessoa : {}
+  const nome = pessoa.nome || o.nome || ''
+  if (!nome) return ''
+  const cpf = formatarCpfCnpj(pessoa.cpfCnpj || pessoa.cpf)
+  return [
+    nome,
+    o.atribuicaoDesc,
+    cpf && `CPF/CNPJ: ${cpf}`,
+    responsavel.matricula && `Matrícula: ${responsavel.matricula}`,
+    rotuloCadastro(responsavel.cargo) && `Cargo: ${rotuloCadastro(responsavel.cargo)}`,
+  ]
+    .filter(Boolean)
+    .join(' — ')
+}
+
+// Relatório próprio da forma de contratação ("forma de contratação processo adm
+// 7/2026"): os dados que a tela "Forma de contratação" mostra, na ordem da tela,
+// e depois TODOS os demais campos do GET `contratacao` (inclusive os vazios),
+// pra nada se perder; autoridade e comissão julgadora ganham blocos com o
+// detalhe de cada pessoa e do ato de designação.
+function montarDocumentoFormaContratacao(p) {
+  const c = p.contratacao && typeof p.contratacao === 'object' ? p.contratacao : {}
+  const numeroLicitacao =
+    c.numeroSequencial != null ? (c.anoSequencial != null ? `${c.numeroSequencial}/${c.anoSequencial}` : String(c.numeroSequencial)) : ''
+  const formaJulgamento = p.formaJulgamento || c.formaJulgamentoProcesso
+  const comissao = c.membroComissao && typeof c.membroComissao === 'object' ? c.membroComissao : {}
+  const dadosComissao = comissao.comissaoLicitacao && typeof comissao.comissaoLicitacao === 'object' ? comissao.comissaoLicitacao : {}
+  const ato = dadosComissao.ato && typeof dadosComissao.ato === 'object' ? dadosComissao.ato : {}
+
+  const mapeadas = [
+    ['Modalidade', rotuloCadastro(c.modalidade)],
+    ['Sigla da modalidade', c.modalidade && typeof c.modalidade === 'object' ? c.modalidade.sigla : ''],
+    ['Número da licitação', numeroLicitacao],
+    ['Forma de contratação (tipo)', c.formaContratacaoDesc || c.formaContratacao],
+    ['Fundamento legal', c.fundamentacaoLegal ? valorProcesso('fundamentacaoLegal', c.fundamentacaoLegal, p) : ''],
+    ['Registro de preço', textoSimNao(c.registroPreco)],
+    ['Forma de julgamento', formaJulgamento ? valorProcesso('formaJulgamento', formaJulgamento, p) : ''],
+    ['Modo de disputa', c.modoDisputa],
+    ['Número da chamada pública', c.numeroChamadaPublica],
+    ['Data da autorização', c.dataAutorizacaoAdesaoAtaRegPreco ? valorProcesso('dataAutorizacaoAdesaoAtaRegPreco', c.dataAutorizacaoAdesaoAtaRegPreco, p) : ''],
+    ['Autoridade competente', c.responsavel ? valorProcesso('autoridadeCompetente', c.responsavel, p) : ''],
+    ['Comissão julgadora', c.membroComissao ? valorProcesso('membroComissao', c.membroComissao, p) : ''],
+  ]
+  const tratadas = new Set([
+    'id',
+    'entidade',
+    'processoAdministrativo',
+    'modalidade',
+    'formaContratacao',
+    'formaContratacaoDesc',
+    'numeroSequencial',
+    'anoSequencial',
+    'fundamentacaoLegal',
+    'registroPreco',
+    'formaJulgamentoProcesso',
+    'modoDisputa',
+    'numeroChamadaPublica',
+    'dataAutorizacaoAdesaoAtaRegPreco',
+    'responsavel',
+    'membroComissao',
+  ])
+  const campos = mapeadas.map(([label, valor]) => ({ label, valor: valor == null ? '' : valor }))
+  for (const [chave, valor] of Object.entries(c)) {
+    if (tratadas.has(chave)) continue
+    campos.push({
+      label: ROTULOS_CONTRATACAO[chave] || formatarChave(chave),
+      valor: valor == null ? '' : textoSimNao(valorProcesso(chave, valor, p)),
+    })
+  }
+
+  const blocos = [{ titulo: 'forma de contratação', campos }]
+
+  const autoridade = detalhePessoaFormaContratacao(c.responsavel)
+  if (autoridade) {
+    const r = c.responsavel
+    blocos.push({
+      titulo: 'autoridade competente',
+      campos: [
+        { label: 'Autoridade', valor: autoridade },
+        { label: 'Tipo de pessoa', valor: r.tipo || (r.pessoa && r.pessoa.tipoPessoa) || '' },
+        { label: 'Responsável interno', valor: r.responsavelInterno == null ? '' : textoSimNao(r.responsavelInterno) },
+        { label: 'Ativo', valor: r.ativo == null ? '' : textoSimNao(r.ativo) },
+      ].filter((campo) => campo.valor !== ''),
+    })
+  }
+
+  if (c.membroComissao) {
+    const membros = Array.isArray(dadosComissao.membros) ? dadosComissao.membros : []
+    blocos.push({
+      titulo: 'comissão julgadora',
+      campos: [
+        { label: 'Número da comissão', valor: dadosComissao.numero ?? '' },
+        { label: 'Finalidade', valor: dadosComissao.finalidade || '' },
+        { label: 'Tipo da comissão', valor: dadosComissao.tipoComissaoLicitacaoDesc || dadosComissao.tipoComissaoLicitacao || '' },
+        { label: 'Data de expiração', valor: dadosComissao.dataExpiracao ? formatarData(dadosComissao.dataExpiracao) : '' },
+        { label: 'Data de exoneração', valor: dadosComissao.dataExoneracao ? formatarData(dadosComissao.dataExoneracao) : '' },
+        { label: 'Ato — número', valor: ato.numeroAto || '' },
+        { label: 'Ato — ementa', valor: ato.ementa || '' },
+        { label: 'Ato — data de publicação', valor: ato.dataPublicacao ? formatarData(ato.dataPublicacao) : '' },
+        { label: 'Ato — data de vigência', valor: ato.dataVigorar ? formatarData(ato.dataVigorar) : '' },
+        { label: 'Membro responsável', valor: detalhePessoaFormaContratacao(comissao) },
+        ...membros.map((m, i) => ({ label: `Membro ${i + 1}`, valor: detalhePessoaFormaContratacao(m) })),
+      ].filter((campo) => campo.valor !== '' && campo.valor != null),
+    })
+  }
+
+  return {
+    chave: 'formacontratacao',
+    titulo: `forma de contratação processo adm ${numeroProcesso(p)}`,
+    blocos,
+  }
 }
 
 function montarDocumentosDemais(p, base) {
