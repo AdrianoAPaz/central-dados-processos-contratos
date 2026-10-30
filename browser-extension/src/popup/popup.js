@@ -549,10 +549,7 @@ async function comDetalhes(contrato) {
     // Registros da rotina "Textos" — documento "textos contrato X".
     // `contratacao` de cada texto também só traz o id interno — vira o
     // sequencial (ver enriquecerSequenciaisContratacao).
-    textos: await anexarHistoricoArquivosTextos(
-      await enriquecerSequenciaisContratacao(respAnexosTextos.textos || [], contrato),
-      contrato,
-    ),
+    textos: await enriquecerSequenciaisContratacao(respAnexosTextos.textos || [], contrato),
     anexosPublicacao: (respAnexosPublicacao && !respAnexosPublicacao.erro && respAnexosPublicacao.anexos) || [],
     publicacoes: await enriquecerVeiculosPublicacao((respPublicacoes && !respPublicacoes.erro && respPublicacoes.publicacoes) || []),
     responsaveis: respResponsaveis.responsaveis || [],
@@ -561,29 +558,6 @@ async function comDetalhes(contrato) {
       contrato,
     ),
   }
-}
-
-// Histórico de cada arquivo anexado aos textos (quem anexou e quando) —
-// best-effort: erro vira arquivo sem histórico, não trava o relatório.
-async function anexarHistoricoArquivosTextos(textos, contrato) {
-  return Promise.all(
-    textos.map(async (texto) => {
-      if (!texto || texto.id == null || !Array.isArray(texto.arquivos)) return texto
-      const arquivos = await Promise.all(
-        texto.arquivos.map(async (arquivo) => {
-          if (!arquivo || arquivo.id == null) return arquivo
-          const resp = await chrome.runtime.sendMessage({
-            type: 'buscar-historico-arquivo-texto',
-            contratoId: contrato.id,
-            textoId: texto.id,
-            arquivoId: arquivo.id,
-          })
-          return { ...arquivo, historico: (resp && !resp.erro && resp.historico) || [] }
-        }),
-      )
-      return { ...texto, arquivos }
-    }),
-  )
 }
 
 // Histórico (quem registrou cada situação e quando) de cada interação

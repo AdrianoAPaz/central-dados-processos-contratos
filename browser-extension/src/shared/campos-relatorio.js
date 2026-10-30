@@ -492,26 +492,16 @@ export function montarDocumentoTextos(c) {
   }
 }
 
-// Histórico dos arquivos anexados ao texto (menu "⋮" do anexo no Betha): quem
-// anexou e quando, uma linha por registro de histórico de cada arquivo.
+// Quem anexou cada arquivo do texto e quando — o "Detalhes do anexo" do Betha
+// (confirmado ao vivo, 2026-10-30): vem inline em cada item de `arquivos`
+// como `usuarioCriacao` e `dhCriacao` ("2026-10-28 16:50:22.887"), sem
+// endpoint próprio de histórico.
 export function montarTabelaHistoricoAnexos(arquivos) {
-  const linhas = []
-  for (const arquivo of Array.isArray(arquivos) ? arquivos : []) {
-    const historico = Array.isArray(arquivo && arquivo.historico) ? arquivo.historico : []
-    const dataHora = (h) => (h && (h.dataHoraCriacao || h.dhHistorico || h.dataHora)) || ''
-    const ordenados = [...historico].sort((a, b) => String(dataHora(a)).localeCompare(String(dataHora(b))))
-    for (const h of ordenados) {
-      const usuario = h && h.usuario
-      linhas.push([
-        valorTexto(arquivo.nome),
-        (usuario && (usuario.nome || usuario.id)) || '',
-        formatarDataHora(dataHora(h)),
-        valorTexto(h && (h.situacaoDesc || h.situacao || h.acaoDesc || h.acao)),
-      ])
-    }
-  }
+  const linhas = (Array.isArray(arquivos) ? arquivos : [])
+    .filter((arquivo) => arquivo && (arquivo.usuarioCriacao || arquivo.dhCriacao))
+    .map((arquivo) => [valorTexto(arquivo.nome), arquivo.usuarioCriacao || '', formatarDataHora(arquivo.dhCriacao)])
   return linhas.length
-    ? { colunas: ['Arquivo', 'Anexado por', 'Data/hora', 'Situação'], linhas }
+    ? { colunas: ['Arquivo', 'Anexado por', 'Data/hora'], linhas }
     : { colunas: [], linhas: [] }
 }
 

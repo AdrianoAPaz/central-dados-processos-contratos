@@ -357,7 +357,7 @@ async function carregar() {
     const tabelaHistoricoAnexos = criarTabelaDinamica(bloco.tabelaHistoricoAnexos)
     if (tabelaHistoricoAnexos) {
       const h4 = document.createElement('h4')
-      h4.textContent = formatarTitulo('Histórico dos anexos')
+      h4.textContent = formatarTitulo('Anexados por')
       div.appendChild(h4)
       div.appendChild(tabelaHistoricoAnexos)
     }
