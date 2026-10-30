@@ -704,7 +704,9 @@ function documentoFornecedor(raw) {
   const f = raw && raw.fornecedor && typeof raw.fornecedor === 'object' ? raw.fornecedor : {}
   const pessoa = f.pessoa && typeof f.pessoa === 'object' ? f.pessoa : {}
   const doc = pessoa.cpfCnpj || pessoa.cnpj || pessoa.cpf || f.cpfCnpj || f.cnpj || f.cpf || raw.cpfCnpjFornecedor || ''
-  return String(doc)
+  // Formato visto em `atasregistropreco` (2026-10-30): fornecedor.pessoa.cpfCnpj,
+  // só dígitos ("59783143000160") — a tela mostra "59.783.143/0001-60".
+  return doc ? formatarCpfCnpj(doc) : ''
 }
 
 // Campos da ata na ordem da API, com valores monetários formatados
