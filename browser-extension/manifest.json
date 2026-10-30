@@ -3,7 +3,7 @@
   "name": "Central de Dados — Coletor de Contratos",
   "version": "0.2.0",
   "description": "Lê contratos do Betha Contratos e processos administrativos do Betha Compras Cloud (somente leitura) e envia para a Central de Dados de Processos e Contratos.",
-  "permissions": ["storage"],
+  "permissions": ["storage", "unlimitedStorage"],
   "host_permissions": [
     "*://contratos.betha.cloud/*",
     "*://api.contratos.betha.cloud/*",
