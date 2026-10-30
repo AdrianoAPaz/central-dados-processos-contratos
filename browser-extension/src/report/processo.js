@@ -15,6 +15,7 @@ import {
   subrecurso,
 } from '../shared/campos-relatorio-processo.js'
 import { criarZip } from '../shared/zip.js'
+import { formatarTitulo } from '../shared/titulo.js'
 import {
   listarDocumentosAta,
   listarDocumentosParticipantes,
@@ -46,7 +47,7 @@ function numeroParaArquivo(processo) {
 // de contratos), agrupando tudo num único .zip.
 async function montarPacoteRelatorio(processo, anexos, container) {
   const titulo = document.createElement('h2')
-  titulo.textContent = 'Anexos e relatório em PDF'
+  titulo.textContent = formatarTitulo('Anexos e relatório em PDF')
   container.appendChild(titulo)
 
   const lista = document.createElement('ul')
@@ -167,7 +168,7 @@ async function carregar() {
     const tabela = criarTabelaDinamica(montarTabelaGenerica(registros, excluir, processo))
     if (!tabela) continue
     const h2 = document.createElement('h2')
-    h2.textContent = `${rotulo} (${registros.length})`
+    h2.textContent = formatarTitulo(`${rotulo} (${registros.length})`)
     containerTabelas.appendChild(h2)
     containerTabelas.appendChild(tabela)
   }
@@ -176,7 +177,7 @@ async function carregar() {
   const containerDocumentos = document.getElementById('documentos')
   for (const documento of montarDocumentosSubrecursos(processo)) {
     const h2 = document.createElement('h2')
-    h2.textContent = `${documento.titulo.charAt(0).toUpperCase()}${documento.titulo.slice(1)} (${documento.blocos.length})`
+    h2.textContent = formatarTitulo(`${documento.titulo.charAt(0).toUpperCase()}${documento.titulo.slice(1)} (${documento.blocos.length})`)
     containerDocumentos.appendChild(h2)
 
     if (!documento.blocos.length && documento.vazio) {
@@ -189,7 +190,7 @@ async function carregar() {
       const div = document.createElement('div')
       div.className = 'aditivo-secao'
       const h3 = document.createElement('h3')
-      h3.textContent = bloco.titulo
+      h3.textContent = formatarTitulo(bloco.titulo)
       div.appendChild(h3)
       div.appendChild(criarTabelaCampos(bloco.campos))
       containerDocumentos.appendChild(div)

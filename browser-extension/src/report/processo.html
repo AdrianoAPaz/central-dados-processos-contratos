@@ -4,32 +4,34 @@
 <meta charset="UTF-8" />
 <title>Relatório de processo administrativo</title>
 <style>
-  body { font-family: Arial, Helvetica, sans-serif; max-width: 720px; margin: 24px auto; color: #222; }
-  h1 { font-size: 18px; margin-bottom: 2px; }
-  .subtitulo { color: #666; font-size: 12px; margin-bottom: 18px; }
+  /* Tipografia sóbria de documento administrativo/de auditoria: fonte serifada,
+     hierarquia h1 > h2 > h3 > h4, cores neutras e sem elementos decorativos. */
+  body { font-family: 'Times New Roman', Times, 'Liberation Serif', serif; font-size: 14px; line-height: 1.45; max-width: 760px; margin: 24px auto; color: #1a1a1a; }
+  h1 { font-size: 22px; font-weight: bold; margin: 0 0 2px; }
+  .subtitulo { color: #555; font-size: 13px; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1.5px solid #555; }
   table { width: 100%; border-collapse: collapse; }
-  td { padding: 8px 10px; border-bottom: 1px solid #e0e0e0; font-size: 13px; vertical-align: top; }
-  td.campo { width: 40%; font-weight: bold; color: #444; }
+  td { padding: 6px 10px; border-bottom: 1px solid #d0d0d0; font-size: 14px; vertical-align: top; }
+  td.campo { width: 40%; font-weight: bold; color: #1a1a1a; background: #f5f5f5; }
   td.valor { white-space: pre-line; }
   .acoes { margin-top: 20px; }
-  button { padding: 8px 16px; font-size: 13px; cursor: pointer; }
-  .vazio { color: #b3261e; font-size: 13px; }
+  button { padding: 6px 16px; font-family: inherit; font-size: 14px; cursor: pointer; }
+  .vazio { color: #8a1c1c; font-size: 14px; }
 
-  h2 { font-size: 15px; margin: 24px 0 10px; }
+  h2 { font-size: 17px; font-weight: bold; margin: 26px 0 8px; padding-bottom: 3px; border-bottom: 1px solid #b0b0b0; }
 
   .aditivos { margin-top: 28px; }
   .aditivo-secao { margin-bottom: 18px; page-break-inside: avoid; }
   .aditivo-secao h3 {
-    font-size: 13px;
-    background: #f2f2f2;
-    padding: 6px 10px;
-    margin: 0 0 4px;
-    border-radius: 4px;
+    font-size: 15px;
+    font-weight: bold;
+    margin: 14px 0 4px;
   }
   .aditivo-secao h4 {
-    font-size: 12px;
-    color: #444;
-    margin: 14px 0 4px 10px;
+    font-size: 14px;
+    font-weight: bold;
+    font-style: italic;
+    color: #333;
+    margin: 12px 0 4px 10px;
   }
   .aditivo-secao h4 + table {
     margin-left: 10px;
@@ -38,16 +40,16 @@
 
   .tabela-itens { margin: 6px 0 4px; }
   .tabela-itens th, .tabela-itens td {
-    padding: 5px 8px;
-    border: 1px solid #e0e0e0;
-    font-size: 12px;
+    padding: 4px 8px;
+    border: 1px solid #c8c8c8;
+    font-size: 13px;
     text-align: left;
   }
-  .tabela-itens th { background: #fafafa; }
-  .sem-itens { color: #666; font-size: 12.5px; font-style: italic; margin: 4px 0 0; }
+  .tabela-itens th { background: #e8e8e8; font-weight: bold; }
+  .sem-itens { color: #555; font-size: 13px; font-style: italic; margin: 4px 0 0; }
 
   .lista-anexos { list-style: none; padding: 0; margin: 0; }
-  .lista-anexos li { padding: 5px 0; font-size: 12.5px; border-bottom: 1px solid #f0f0f0; }
+  .lista-anexos li { padding: 4px 0; font-size: 13px; border-bottom: 1px solid #e8e8e8; }
 
   @media print {
     .lista-anexos { display: none; }
