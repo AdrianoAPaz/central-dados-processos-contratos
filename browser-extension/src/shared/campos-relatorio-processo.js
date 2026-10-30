@@ -685,6 +685,8 @@ function montarDocumentoFormaContratacao(p) {
   return {
     chave: 'formacontratacao',
     titulo: `forma de contratação processo adm ${numeroProcesso(p)}`,
+    // Nome do arquivo (sem extensão), quando difere do título.
+    arquivo: `forma de contratação proc adm ${numeroProcesso(p)}`,
     blocos,
   }
 }

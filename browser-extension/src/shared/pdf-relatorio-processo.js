@@ -90,7 +90,7 @@ export function listarDocumentosProcesso(processo) {
   const documentos = [{ nome: `${slug(tituloProcesso(processo))}.pdf`, gerar: () => gerarPdfProcesso(processo) }]
   for (const documento of montarDocumentosSubrecursos(processo)) {
     if (documento.chave === 'atas' || documento.chave === 'participantes') continue
-    documentos.push({ nome: `${slug(documento.titulo)}.pdf`, gerar: () => gerarPdfSubrecurso(documento) })
+    documentos.push({ nome: `${slug(documento.arquivo || documento.titulo)}.pdf`, gerar: () => gerarPdfSubrecurso(documento) })
   }
   return documentos
 }
