@@ -1,6 +1,6 @@
 # Central de Dados de Processos e Contratos
 
-Gera relatório dos dados de processos administrativos, Atas de registro de Preço, contratos, solicitações de fornecimento (ordens de
+Gera relatórios dos dados de processos administrativos, Atas de registro de Preço, contratos, solicitações de fornecimento (ordens de
 compra) e interações contábeis vindos dos sistemas Betha Cloud. Uso interno da equipe de suporte,
 sem necessidade de login.
 
