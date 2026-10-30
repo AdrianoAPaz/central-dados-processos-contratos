@@ -182,6 +182,7 @@ export const SUBRECURSOS_EM_TABELA = [
 export const SUBRECURSOS_EM_DOCUMENTO = [
   { chave: 'pareceres', rotulo: 'pareceres', singular: 'parecer' },
   { chave: 'sessoesjulgamento', rotulo: 'sessões de julgamento', singular: 'sessão de julgamento' },
+  { chave: 'atassessao', rotulo: 'atas das sessões de julgamento', singular: 'ata da sessão' },
   { chave: 'atosfinais', rotulo: 'atos finais', singular: 'ato final' },
   { chave: 'despesas', rotulo: 'despesas', singular: 'despesa' },
   { chave: 'historico', rotulo: 'histórico', singular: 'registro' },
@@ -588,14 +589,60 @@ function montarDocumentosDemais(p, base) {
       vazio,
       tabelaHistorico: chave === 'historico' ? montarTabelaHistoricoProcesso(registros, p) : null,
       blocos: [
-        ...registros.map((raw, index) =>
-          chave === 'textos'
-            ? { titulo: tituloBlocoTexto(raw, index), campos: camposTextoProcesso(raw, p) }
-            : { titulo: `${singular} ${index + 1}`, campos: camposDe(raw, p, ocultar) },
-        ),
+        ...registros.map((raw, index) => {
+          if (chave === 'textos') return { titulo: tituloBlocoTexto(raw, index), campos: camposTextoProcesso(raw, p) }
+          if (chave === 'atassessao') return { titulo: `${singular} ${index + 1}`, campos: camposAtaSessao(raw, p) }
+          const campos = camposDe(raw, p, ocultar)
+          if (chave === 'sessoesjulgamento') campos.push(...camposDetalheSessao(raw, p))
+          return { titulo: `${singular} ${index + 1}`, campos }
+        }),
         ...(chave === 'despesas' ? blocoResumoDespesas(registros, p) : []),
       ],
     }))
+}
+
+function tamanhoArquivo(bytes) {
+  const n = Number(bytes)
+  if (!n || Number.isNaN(n)) return ''
+  return n >= 1048576 ? `${(n / 1048576).toFixed(1).replace('.', ',')} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
+}
+
+// Ata da sessão de julgamento (`sessoesjulgamento/atasprocesso`, formato visto
+// em 2026-10-30): sequencial, tipo da ata, texto (HTML do editor) e arquivos;
+// a sessão vem aninhada com membros e andamento, que ficam de fora daqui (o
+// documento de sessões os mostra).
+function camposAtaSessao(raw, p) {
+  const sessao = raw && raw.sessaoJulgamento && typeof raw.sessaoJulgamento === 'object' ? raw.sessaoJulgamento : {}
+  const tipoSessao = rotuloCadastro(sessao.tipoSessaoJulgamento)
+  const arquivos = (Array.isArray(raw && raw.arquivos) ? raw.arquivos : [])
+    .map((a) => [a.nome, tamanhoArquivo(a.tamanho)].filter(Boolean).join(' — '))
+    .filter(Boolean)
+    .join('; ')
+  return [
+    { label: 'Sequencial', valor: raw && raw.sequencial != null ? raw.sequencial : '' },
+    { label: 'Tipo da ata', valor: rotuloCadastro(raw && raw.tipoAta) },
+    { label: 'Sessão', valor: [sessao.numeroSessao, tipoSessao].filter((v) => v != null && v !== '').join(' - ') },
+    { label: 'Situação da sessão', valor: sessao.situacaoAtualDesc || '' },
+    { label: 'Texto da ata', valor: raw && raw.textoAta ? conteudoTexto(raw.textoAta) : '' },
+    { label: 'Arquivos', valor: arquivos },
+  ].filter((campo) => campo.valor !== '' && campo.valor != null)
+}
+
+// Membros e andamento da sessão de julgamento, que a lista de sessões traz
+// vazios: vêm da sessão aninhada nas atas (`atassessao`), ligada pelo id.
+function camposDetalheSessao(sessao, p) {
+  const ata = subrecurso(p, 'atassessao').find((a) => a && a.sessaoJulgamento && String(a.sessaoJulgamento.id) === String(sessao && sessao.id))
+  const detalhe = ata && ata.sessaoJulgamento
+  if (!detalhe) return []
+  const membros = (detalhe.sessaoJulgamentoMembro || []).map((m) => descreverPessoa(m.comissaoLicitacaoMembro)).filter(Boolean).join(', ')
+  const andamento = (detalhe.sessaoJulgamentoAndamento || [])
+    .map((a) => [valorProcesso('dataHoraAndamento', a.dataHoraAndamento, p), a.situacaoAndamentoDesc || a.situacao].filter(Boolean).join(' - '))
+    .filter(Boolean)
+    .join('; ')
+  return [
+    { label: 'Membros da sessão', valor: membros },
+    { label: 'Andamento da sessão', valor: andamento },
+  ].filter((campo) => campo.valor)
 }
 
 // Rodapé da tela "Despesas": saldo remanescente (soma do valor estimado das

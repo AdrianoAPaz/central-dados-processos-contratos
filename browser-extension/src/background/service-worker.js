@@ -1037,10 +1037,14 @@ async function buscarListaPaginada(sessao, caminho) {
 // `arquivos` inline ou só no GET do texto individual). Mesma regra do Delta
 // Intelligence (`_coletarAnexosDeTextos`); sequencial pra não rajar a API.
 // `textos` já vem completo por completarTextosProcesso.
-function coletarAnexosProcesso(arquivosInline, textos) {
+function coletarAnexosProcesso(arquivosInline, textos, atasSessao = []) {
   const anexos = Array.isArray(arquivosInline) ? [...arquivosInline] : []
   for (const texto of textos) {
     if (texto && Array.isArray(texto.arquivos)) anexos.push(...texto.arquivos)
+  }
+  // Arquivos das atas das sessões de julgamento (ex.: AtaTotal_…pdf).
+  for (const ata of atasSessao) {
+    if (ata && Array.isArray(ata.arquivos)) anexos.push(...ata.arquivos)
   }
   return anexos
 }
@@ -1363,7 +1367,7 @@ async function buscarDetalhesProcesso(processoId, arquivosInline, processo) {
   }
 
   try {
-    subrecursos.anexos = coletarAnexosProcesso(arquivosInline, subrecursos.textos || [])
+    subrecursos.anexos = coletarAnexosProcesso(arquivosInline, subrecursos.textos || [], subrecursos.atassessao || [])
   } catch (e) {
     subrecursos.anexos = []
     avisos.push(`anexos: ${String((e && e.message) || e)}`)
