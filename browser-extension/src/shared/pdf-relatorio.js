@@ -29,6 +29,26 @@ import {
 const MARGEM = 40
 const SUBTITULO_PADRAO = 'Central de Dados de Processos e Contratos'
 
+// Estilo sóbrio, pensado pra leitura/conferência de auditoria: paleta neutra
+// (cinzas), linhas finas, hierarquia título > seção > tabela, cabeçalho de
+// tabela repetido a cada página, linhas que não se partem entre páginas,
+// colunas numéricas à direita e rodapé com paginação. Só apresentação —
+// nenhum dado é alterado. Vale pra todos os PDFs (contratos e processos).
+const COR_TEXTO = [34, 34, 34]
+const COR_TEXTO_SUAVE = [100, 100, 100]
+const COR_LINHA = [200, 200, 200]
+const COR_FUNDO_ROTULO = [243, 243, 243]
+const COR_FUNDO_CABECALHO = [229, 229, 229]
+const COR_FUNDO_ZEBRA = [249, 249, 249]
+const ESTILO_CELULA = {
+  font: 'helvetica',
+  textColor: COR_TEXTO,
+  lineColor: COR_LINHA,
+  lineWidth: 0.5,
+  valign: 'top',
+  overflow: 'linebreak',
+}
+
 function obterJsPDF() {
   const ns = window.jspdf
   if (!ns || !ns.jsPDF) {
@@ -50,208 +70,9 @@ export function garantirEspaco(doc, cursor, alturaMinima) {
   return cursor
 }
 
-export function desenharTitulo(doc, cursor, texto, tamanhoFonte) {
-  cursor = garantirEspaco(doc, cursor, tamanhoFonte + 10)
-  doc.setFontSize(tamanhoFonte)
-  doc.setFont('helvetica', 'bold')
-  doc.text(texto, MARGEM, cursor)
-  doc.setFont('helvetica', 'normal')
-  return cursor + tamanhoFonte + 6
-}
-
-// Tabela de 2 colunas (label/valor) — mesmo formato da tabela de campos do
-// contrato/aditivo/solicitação na tela.
-export function desenharTabelaCampos(doc, cursor, campos) {
-  doc.autoTable({
-    startY: cursor,
-    margin: { left: MARGEM, right: MARGEM },
-    theme: 'grid',
-    styles: { fontSize: 9, cellPadding: 4 },
-    columnStyles: { 0: { fontStyle: 'bold', cellWidth: 160 } },
-    // 0 é valor de verdade (ex.: "Quantidade de aditivos"), não "sem dado".
-    body: campos.map((c) => [c.label, c.valor === 0 ? '0' : c.valor || '—']),
-  })
-  return doc.lastAutoTable.finalY + 12
-}
-
-// Tabela de colunas dinâmicas (itens do contrato ou de um aditivo).
-export function desenharTabelaDinamica(doc, cursor, { colunas, linhas }) {
-  if (!linhas.length) return cursor
-  doc.autoTable({
-    startY: cursor,
-    margin: { left: MARGEM, right: MARGEM },
-    theme: 'grid',
-    styles: { fontSize: 8, cellPadding: 3 },
-    head: [colunas],
-    body: linhas.map((linha) => linha.map((v) => v || '—')),
-  })
-  return doc.lastAutoTable.finalY + 12
-}
-
-// Cria um documento novo com o cabeçalho padrão (título do documento +
-// subtítulo institucional) — cada relatório (contrato/aditivo/solicitação) é
-// um jsPDF próprio, nunca compartilhado com os demais.
-export function novoDocumento(titulo) {
-  const jsPDF = obterJsPDF()
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
-  let cursor = MARGEM
-
-  doc.setFontSize(16)
-  doc.setFont('helvetica', 'bold')
-  doc.text(titulo, MARGEM, cursor)
-  cursor += 18
-  doc.setFontSize(10)
-  doc.setFont('helvetica', 'normal')
-  doc.text(SUBTITULO_PADRAO, MARGEM, cursor)
-  cursor += 22
-
-  return { doc, cursor }
-}
-
-// PDF com os dados do contrato + itens do contrato — sem aditivos nem
-// solicitações de fornecimento (cada um vira o seu próprio documento).
-export function gerarPdfContrato(contrato) {
-  const { doc, cursor: inicio } = novoDocumento(tituloContrato(contrato))
-  let cursor = desenharTabelaCampos(doc, inicio, montarCamposRelatorio(contrato))
-
-  const tabelaItens = montarTabelaItens(contrato.itens)
-  if (tabelaItens.linhas.length) {
-    cursor = desenharTitulo(doc, cursor, `Itens do contrato (${contrato.itens.length})`, 13)
-    cursor = desenharTabelaDinamica(doc, cursor, tabelaItens)
-  }
-
-  const tabelaResponsaveis = montarTabelaResponsaveis(contrato.responsaveis)
-  if (tabelaResponsaveis.linhas.length) {
-    cursor = desenharTitulo(doc, cursor, `Responsáveis (${contrato.responsaveis.length})`, 13)
-    desenharTabelaDinamica(doc, cursor, tabelaResponsaveis)
-  }
-
-  return doc.output('blob')
-}
-
-// PDF só com os responsáveis do contrato (fiscal, gestor etc.): nome, tipo e
-// período de cada um. A seção também continua no PDF do contrato.
-// Gerado sempre (pedido do usuário, 2026-10-19): sem responsáveis, o
-// documento sai com o aviso em vez da tabela.
-export function gerarPdfResponsaveis(contrato) {
-  const { doc, cursor } = novoDocumento(tituloResponsaveis(contrato))
-  const tabela = montarTabelaResponsaveis(contrato.responsaveis)
-  if (tabela.linhas.length) {
-    desenharTabelaDinamica(doc, cursor, tabela)
-  } else {
-    doc.setFontSize(9)
-    doc.setFont('helvetica', 'italic')
-    doc.text(MENSAGEM_SEM_RESPONSAVEIS, MARGEM, cursor)
-    doc.setFont('helvetica', 'normal')
-  }
-  return doc.output('blob')
-}
-
-function tituloResponsaveis(contrato) {
-  return `responsáveis do ${tituloContrato(contrato)}`
-}
-
-// PDF de UM aditivo (campos + itens vinculados a ele) — `secao` é uma
-// entrada de montarSecoesAditivos.
-export function gerarPdfAditivo(secao) {
-  const { doc, cursor: inicio } = novoDocumento(secao.titulo)
-  let cursor = desenharTabelaCampos(doc, inicio, secao.campos)
-
-  if (secao.tabelaItens.linhas.length) {
-    cursor = desenharTitulo(doc, cursor, 'Itens', 13)
-    desenharTabelaDinamica(doc, cursor, secao.tabelaItens)
-  } else {
-    cursor = garantirEspaco(doc, cursor, 16)
-    doc.setFontSize(9)
-    doc.setFont('helvetica', 'italic')
-    doc.text('Sem itens vinculados', MARGEM, cursor)
-    doc.setFont('helvetica', 'normal')
-  }
-
-  return doc.output('blob')
-}
-
-// PDF de UM apostilamento (todos os campos que a API devolveu) — `secao` é
-// uma entrada de montarSecoesApostilamentos. Apostilamento em geral não tem
-// itens vinculados: a tabela só sai se o registro trouxer `itens`, sem o aviso
-// "Sem itens vinculados" que o aditivo mostra.
-export function gerarPdfApostilamento(secao) {
-  const { doc, cursor: inicio } = novoDocumento(secao.titulo)
-  const cursor = desenharTabelaCampos(doc, inicio, secao.campos)
-  if (secao.tabelaItens.linhas.length) {
-    desenharTabelaDinamica(doc, desenharTitulo(doc, cursor, 'Itens', 13), secao.tabelaItens)
-  }
-  return doc.output('blob')
-}
-
-// PDF de UMA solicitação de fornecimento (todos os campos que a API
-// devolveu + itens vinculados a ela) — `secao` é uma entrada de
-// montarSecoesSolicitacoesFornecimento. Mesmo estilo de gerarPdfAditivo.
-export function gerarPdfSolicitacaoFornecimento(secao) {
-  const { doc, cursor: inicio } = novoDocumentoSobrio(secao.titulo)
-  let cursor = desenharTabelaCamposSobria(doc, inicio, secao.campos)
-
-  cursor = desenharSecaoSobria(doc, cursor, 'Itens')
-  if (secao.tabelaItens.linhas.length) {
-    cursor = desenharTabelaDinamicaSobria(doc, cursor, secao.tabelaItens)
-  } else {
-    cursor = desenharAvisoSobrio(doc, cursor, 'Sem itens vinculados')
-  }
-
-  // Trilha de auditoria: quem registrou cada situação e quando.
-  if (secao.tabelaHistorico.linhas.length) {
-    cursor = desenharSecaoSobria(doc, cursor, 'Histórico')
-    desenharTabelaDinamicaSobria(doc, cursor, secao.tabelaHistorico)
-  }
-  adicionarRodapePaginas(doc, secao.titulo)
-  return doc.output('blob')
-}
-
-// --- Estilo sóbrio do relatório da solicitação de fornecimento -------------
-// Pensado pra leitura/conferência de auditoria: paleta neutra (cinzas), linhas
-// finas, hierarquia título > seção > tabela, cabeçalho de tabela repetido a
-// cada página, linhas que não se partem entre páginas e rodapé com paginação.
-// Só apresentação — nenhum dado é alterado. Os demais relatórios seguem com
-// o estilo padrão acima.
-const COR_TEXTO = [34, 34, 34]
-const COR_TEXTO_SUAVE = [100, 100, 100]
-const COR_LINHA = [200, 200, 200]
-const COR_FUNDO_ROTULO = [243, 243, 243]
-const COR_FUNDO_CABECALHO = [229, 229, 229]
-const COR_FUNDO_ZEBRA = [249, 249, 249]
-const ESTILO_CELULA = {
-  font: 'helvetica',
-  textColor: COR_TEXTO,
-  lineColor: COR_LINHA,
-  lineWidth: 0.5,
-  valign: 'top',
-  overflow: 'linebreak',
-}
-
-function novoDocumentoSobrio(titulo) {
-  const jsPDF = obterJsPDF()
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
-  const largura = doc.internal.pageSize.getWidth()
-  let cursor = MARGEM
-
-  doc.setTextColor(...COR_TEXTO)
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(15)
-  doc.text(titulo, MARGEM, cursor)
-  cursor += 16
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(9)
-  doc.setTextColor(...COR_TEXTO_SUAVE)
-  doc.text(SUBTITULO_PADRAO, MARGEM, cursor)
-  cursor += 8
-  doc.setDrawColor(...COR_TEXTO_SUAVE)
-  doc.setLineWidth(0.8)
-  doc.line(MARGEM, cursor, largura - MARGEM, cursor)
-  doc.setTextColor(...COR_TEXTO)
-  return { doc, cursor: cursor + 16 }
-}
-
-function desenharSecaoSobria(doc, cursor, texto) {
+// Título de seção (ou de bloco/registro) com filete fino embaixo. A
+// hierarquia é única, pra todas as seções ficarem iguais.
+export function desenharTitulo(doc, cursor, texto) {
   // Título + ao menos o cabeçalho e uma linha da tabela juntos, pra não ficar
   // órfão no fim da página.
   cursor = garantirEspaco(doc, cursor, 60)
@@ -267,10 +88,11 @@ function desenharSecaoSobria(doc, cursor, texto) {
   return cursor + 12
 }
 
-function desenharAvisoSobrio(doc, cursor, texto) {
+// Mensagem em itálico cinza (ex.: "Sem itens vinculados").
+export function desenharAviso(doc, cursor, texto, tamanhoFonte = 9) {
   cursor = garantirEspaco(doc, cursor, 20)
   doc.setFont('helvetica', 'italic')
-  doc.setFontSize(9)
+  doc.setFontSize(tamanhoFonte)
   doc.setTextColor(...COR_TEXTO_SUAVE)
   doc.text(texto, MARGEM, cursor + 8)
   doc.setFont('helvetica', 'normal')
@@ -278,7 +100,9 @@ function desenharAvisoSobrio(doc, cursor, texto) {
   return cursor + 28
 }
 
-function desenharTabelaCamposSobria(doc, cursor, campos) {
+// Tabela de 2 colunas (label/valor) — mesmo formato da tabela de campos do
+// contrato/aditivo/solicitação na tela.
+export function desenharTabelaCampos(doc, cursor, campos) {
   doc.autoTable({
     startY: cursor,
     margin: { left: MARGEM, right: MARGEM, bottom: MARGEM + 10 },
@@ -288,7 +112,7 @@ function desenharTabelaCamposSobria(doc, cursor, campos) {
       0: { fontStyle: 'bold', cellWidth: 150, fillColor: COR_FUNDO_ROTULO },
     },
     rowPageBreak: 'avoid',
-    // 0 é valor de verdade, não "sem dado".
+    // 0 é valor de verdade (ex.: "Quantidade de aditivos"), não "sem dado".
     body: campos.map((c) => [c.label, c.valor === 0 ? '0' : c.valor || '—']),
   })
   return doc.lastAutoTable.finalY + 18
@@ -305,10 +129,11 @@ function colunasNumericas(colunas, linhas) {
   })
 }
 
-function desenharTabelaDinamicaSobria(doc, cursor, { colunas, linhas }) {
-  const numericas = colunasNumericas(colunas, linhas)
+// Tabela de colunas dinâmicas (itens do contrato ou de um aditivo).
+export function desenharTabelaDinamica(doc, cursor, { colunas, linhas }) {
+  if (!linhas.length) return cursor
   const columnStyles = {}
-  numericas.forEach((ehNumerica, i) => {
+  colunasNumericas(colunas, linhas).forEach((ehNumerica, i) => {
     if (ehNumerica) columnStyles[i] = { halign: 'right' }
   })
   doc.autoTable({
@@ -332,9 +157,37 @@ function desenharTabelaDinamicaSobria(doc, cursor, { colunas, linhas }) {
   return doc.lastAutoTable.finalY + 18
 }
 
-// Rodapé em todas as páginas: identificação do documento e "Página X de Y".
-// Roda no fim, quando o total de páginas já é conhecido.
-function adicionarRodapePaginas(doc, titulo) {
+// Cria um documento novo com o cabeçalho padrão (título do documento +
+// subtítulo institucional) — cada relatório (contrato/aditivo/solicitação) é
+// um jsPDF próprio, nunca compartilhado com os demais. O título fica guardado
+// no doc pra `finalizarDocumento` repetir no rodapé.
+export function novoDocumento(titulo) {
+  const jsPDF = obterJsPDF()
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+  const largura = doc.internal.pageSize.getWidth()
+  let cursor = MARGEM
+  doc.tituloRelatorio = titulo
+
+  doc.setTextColor(...COR_TEXTO)
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(15)
+  doc.text(titulo, MARGEM, cursor)
+  cursor += 16
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(9)
+  doc.setTextColor(...COR_TEXTO_SUAVE)
+  doc.text(SUBTITULO_PADRAO, MARGEM, cursor)
+  cursor += 8
+  doc.setDrawColor(...COR_TEXTO_SUAVE)
+  doc.setLineWidth(0.8)
+  doc.line(MARGEM, cursor, largura - MARGEM, cursor)
+  doc.setTextColor(...COR_TEXTO)
+  return { doc, cursor: cursor + 16 }
+}
+
+// Fecha o documento: rodapé em todas as páginas (identificação e "Página X de
+// Y", só possível agora que o total de páginas é conhecido) e devolve o blob.
+export function finalizarDocumento(doc) {
   const total = doc.getNumberOfPages()
   const { width, height } = doc.internal.pageSize
   for (let pagina = 1; pagina <= total; pagina++) {
@@ -345,10 +198,102 @@ function adicionarRodapePaginas(doc, titulo) {
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(8)
     doc.setTextColor(...COR_TEXTO_SUAVE)
-    doc.text(`${SUBTITULO_PADRAO} — ${titulo}`, MARGEM, height - 20)
+    doc.text(`${SUBTITULO_PADRAO} — ${doc.tituloRelatorio}`, MARGEM, height - 20)
     doc.text(`Página ${pagina} de ${total}`, width - MARGEM, height - 20, { align: 'right' })
   }
   doc.setTextColor(...COR_TEXTO)
+  return doc.output('blob')
+}
+
+// PDF com os dados do contrato + itens do contrato — sem aditivos nem
+// solicitações de fornecimento (cada um vira o seu próprio documento).
+export function gerarPdfContrato(contrato) {
+  const { doc, cursor: inicio } = novoDocumento(tituloContrato(contrato))
+  let cursor = desenharTabelaCampos(doc, inicio, montarCamposRelatorio(contrato))
+
+  const tabelaItens = montarTabelaItens(contrato.itens)
+  if (tabelaItens.linhas.length) {
+    cursor = desenharTitulo(doc, cursor, `Itens do contrato (${contrato.itens.length})`)
+    cursor = desenharTabelaDinamica(doc, cursor, tabelaItens)
+  }
+
+  const tabelaResponsaveis = montarTabelaResponsaveis(contrato.responsaveis)
+  if (tabelaResponsaveis.linhas.length) {
+    cursor = desenharTitulo(doc, cursor, `Responsáveis (${contrato.responsaveis.length})`)
+    desenharTabelaDinamica(doc, cursor, tabelaResponsaveis)
+  }
+
+  return finalizarDocumento(doc)
+}
+
+// PDF só com os responsáveis do contrato (fiscal, gestor etc.): nome, tipo e
+// período de cada um. A seção também continua no PDF do contrato.
+// Gerado sempre (pedido do usuário, 2026-10-19): sem responsáveis, o
+// documento sai com o aviso em vez da tabela.
+export function gerarPdfResponsaveis(contrato) {
+  const { doc, cursor } = novoDocumento(tituloResponsaveis(contrato))
+  const tabela = montarTabelaResponsaveis(contrato.responsaveis)
+  if (tabela.linhas.length) {
+    desenharTabelaDinamica(doc, cursor, tabela)
+  } else {
+    desenharAviso(doc, cursor, MENSAGEM_SEM_RESPONSAVEIS)
+  }
+  return finalizarDocumento(doc)
+}
+
+function tituloResponsaveis(contrato) {
+  return `responsáveis do ${tituloContrato(contrato)}`
+}
+
+// PDF de UM aditivo (campos + itens vinculados a ele) — `secao` é uma
+// entrada de montarSecoesAditivos.
+export function gerarPdfAditivo(secao) {
+  const { doc, cursor: inicio } = novoDocumento(secao.titulo)
+  let cursor = desenharTabelaCampos(doc, inicio, secao.campos)
+
+  if (secao.tabelaItens.linhas.length) {
+    cursor = desenharTitulo(doc, cursor, 'Itens')
+    desenharTabelaDinamica(doc, cursor, secao.tabelaItens)
+  } else {
+    cursor = desenharAviso(doc, cursor, 'Sem itens vinculados')
+  }
+
+  return finalizarDocumento(doc)
+}
+
+// PDF de UM apostilamento (todos os campos que a API devolveu) — `secao` é
+// uma entrada de montarSecoesApostilamentos. Apostilamento em geral não tem
+// itens vinculados: a tabela só sai se o registro trouxer `itens`, sem o aviso
+// "Sem itens vinculados" que o aditivo mostra.
+export function gerarPdfApostilamento(secao) {
+  const { doc, cursor: inicio } = novoDocumento(secao.titulo)
+  const cursor = desenharTabelaCampos(doc, inicio, secao.campos)
+  if (secao.tabelaItens.linhas.length) {
+    desenharTabelaDinamica(doc, desenharTitulo(doc, cursor, 'Itens'), secao.tabelaItens)
+  }
+  return finalizarDocumento(doc)
+}
+
+// PDF de UMA solicitação de fornecimento (todos os campos que a API
+// devolveu + itens vinculados a ela) — `secao` é uma entrada de
+// montarSecoesSolicitacoesFornecimento. Mesmo estilo de gerarPdfAditivo.
+export function gerarPdfSolicitacaoFornecimento(secao) {
+  const { doc, cursor: inicio } = novoDocumento(secao.titulo)
+  let cursor = desenharTabelaCampos(doc, inicio, secao.campos)
+
+  cursor = desenharTitulo(doc, cursor, 'Itens')
+  if (secao.tabelaItens.linhas.length) {
+    cursor = desenharTabelaDinamica(doc, cursor, secao.tabelaItens)
+  } else {
+    cursor = desenharAviso(doc, cursor, 'Sem itens vinculados')
+  }
+
+  // Trilha de auditoria: quem registrou cada situação e quando.
+  if (secao.tabelaHistorico.linhas.length) {
+    cursor = desenharTitulo(doc, cursor, 'Histórico')
+    desenharTabelaDinamica(doc, cursor, secao.tabelaHistorico)
+  }
+  return finalizarDocumento(doc)
 }
 
 // PDF de UMA interação contábil (todos os campos que a API devolveu) —
@@ -358,9 +303,9 @@ export function gerarPdfInteracaoContabilidade(secao) {
   const cursor = desenharTabelaCampos(doc, inicio, secao.campos)
   // Trilha de auditoria: quem registrou cada situação e quando.
   if (secao.tabelaHistorico.linhas.length) {
-    desenharTabelaDinamica(doc, desenharTitulo(doc, cursor, 'Histórico', 13), secao.tabelaHistorico)
+    desenharTabelaDinamica(doc, desenharTitulo(doc, cursor, 'Histórico'), secao.tabelaHistorico)
   }
-  return doc.output('blob')
+  return finalizarDocumento(doc)
 }
 
 // PDF com os recebimentos de UMA solicitação de fornecimento — documento
@@ -376,22 +321,17 @@ export function gerarPdfRecebimentos(secao) {
   const { doc, cursor: inicioDoc } = novoDocumento(secao.titulo)
   let cursor = inicioDoc
   for (const recebimento of secao.recebimentos) {
-    cursor = desenharTitulo(doc, cursor, recebimento.titulo, 12)
+    cursor = desenharTitulo(doc, cursor, recebimento.titulo)
     cursor = desenharTabelaCampos(doc, cursor, recebimento.campos)
 
     if (recebimento.tabelaItens.linhas.length) {
-      cursor = desenharTitulo(doc, cursor, 'Itens', 11)
+      cursor = desenharTitulo(doc, cursor, 'Itens')
       cursor = desenharTabelaDinamica(doc, cursor, recebimento.tabelaItens)
     } else {
-      cursor = garantirEspaco(doc, cursor, 16)
-      doc.setFontSize(9)
-      doc.setFont('helvetica', 'italic')
-      doc.text('Sem itens vinculados', MARGEM, cursor)
-      doc.setFont('helvetica', 'normal')
-      cursor += 20
+      cursor = desenharAviso(doc, cursor, 'Sem itens vinculados')
     }
   }
-  return doc.output('blob')
+  return finalizarDocumento(doc)
 }
 
 // PDF "publicação contrato X" — um bloco por publicação com todos os campos,
@@ -401,16 +341,13 @@ export function gerarPdfPublicacoes(documento) {
   const { doc, cursor: inicioDoc } = novoDocumento(documento.titulo)
   let cursor = inicioDoc
   if (!documento.blocos.length) {
-    doc.setFontSize(9)
-    doc.setFont('helvetica', 'italic')
-    doc.text('Sem publicações cadastradas', MARGEM, cursor)
-    doc.setFont('helvetica', 'normal')
+    cursor = desenharAviso(doc, cursor, 'Sem publicações cadastradas')
   }
   for (const bloco of documento.blocos) {
-    cursor = desenharTitulo(doc, cursor, bloco.titulo, 12)
+    cursor = desenharTitulo(doc, cursor, bloco.titulo)
     cursor = desenharTabelaCampos(doc, cursor, bloco.campos)
   }
-  return doc.output('blob')
+  return finalizarDocumento(doc)
 }
 
 // PDF "despesas contrato X" — um bloco por despesa vinculada com todos os
@@ -420,16 +357,13 @@ export function gerarPdfDespesas(documento) {
   const { doc, cursor: inicioDoc } = novoDocumento(documento.titulo)
   let cursor = inicioDoc
   if (!documento.blocos.length) {
-    doc.setFontSize(9)
-    doc.setFont('helvetica', 'italic')
-    doc.text(MENSAGEM_SEM_DESPESAS, MARGEM, cursor)
-    doc.setFont('helvetica', 'normal')
+    cursor = desenharAviso(doc, cursor, MENSAGEM_SEM_DESPESAS)
   }
   for (const bloco of documento.blocos) {
-    cursor = desenharTitulo(doc, cursor, bloco.titulo, 12)
+    cursor = desenharTitulo(doc, cursor, bloco.titulo)
     cursor = desenharTabelaCampos(doc, cursor, bloco.campos)
   }
-  return doc.output('blob')
+  return finalizarDocumento(doc)
 }
 
 // PDF "textos contrato X" — um bloco por texto da rotina "Textos" com todos
@@ -439,16 +373,13 @@ export function gerarPdfTextos(documento) {
   const { doc, cursor: inicioDoc } = novoDocumento(documento.titulo)
   let cursor = inicioDoc
   if (!documento.blocos.length) {
-    doc.setFontSize(9)
-    doc.setFont('helvetica', 'italic')
-    doc.text(MENSAGEM_SEM_TEXTOS, MARGEM, cursor)
-    doc.setFont('helvetica', 'normal')
+    cursor = desenharAviso(doc, cursor, MENSAGEM_SEM_TEXTOS)
   }
   for (const bloco of documento.blocos) {
-    cursor = desenharTitulo(doc, cursor, bloco.titulo, 12)
+    cursor = desenharTitulo(doc, cursor, bloco.titulo)
     cursor = desenharTabelaCampos(doc, cursor, bloco.campos)
   }
-  return doc.output('blob')
+  return finalizarDocumento(doc)
 }
 
 // Nome de arquivo a partir da descrição do documento (ex.: "aditivo 1" ->
