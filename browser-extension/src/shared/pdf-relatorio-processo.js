@@ -19,8 +19,9 @@ import {
 import {
   desenharTabelaCampos,
   desenharTabelaDinamica,
+  desenharAviso,
   desenharTitulo,
-  garantirEspaco,
+  finalizarDocumento,
   novoDocumento,
   slug,
 } from './pdf-relatorio.js'
@@ -35,24 +36,19 @@ export function gerarPdfProcesso(processo) {
     if (!registros.length) continue
 
     const tabela = montarTabelaGenerica(registros, excluir, processo)
-    cursor = desenharTitulo(doc, cursor, `${rotulo} (${registros.length})`, 13)
+    cursor = desenharTitulo(doc, cursor, `${rotulo} (${registros.length})`)
     cursor = desenharTabelaDinamica(doc, cursor, tabela)
 
     cursor = desenharAvisoOmitidas(doc, cursor, tabela.omitidas)
   }
 
-  return doc.output('blob')
+  return finalizarDocumento(doc)
 }
 
 // Aviso abaixo de uma tabela que não coube inteira no PDF.
 function desenharAvisoOmitidas(doc, cursor, omitidas) {
   if (!(omitidas > 0)) return cursor
-  cursor = garantirEspaco(doc, cursor, 16)
-  doc.setFontSize(8)
-  doc.setFont('helvetica', 'italic')
-  doc.text(`Mais ${omitidas} campo(s) por registro estão no relatório em Excel da Central de Dados.`, 40, cursor)
-  doc.setFont('helvetica', 'normal')
-  return cursor + 18
+  return desenharAviso(doc, cursor, `Mais ${omitidas} campo(s) por registro estão no relatório em Excel da Central de Dados.`, 8)
 }
 
 // PDF de UM sub-recurso: cada registro é um bloco com todos os campos. Sem
@@ -62,16 +58,13 @@ export function gerarPdfSubrecurso(documento) {
   const { doc, cursor: inicioDoc } = novoDocumento(documento.titulo)
   let cursor = inicioDoc
   if (!documento.blocos.length && documento.vazio) {
-    doc.setFontSize(9)
-    doc.setFont('helvetica', 'italic')
-    doc.text(documento.vazio, 40, cursor)
-    doc.setFont('helvetica', 'normal')
+    cursor = desenharAviso(doc, cursor, documento.vazio)
   }
   for (const bloco of documento.blocos) {
-    cursor = desenharTitulo(doc, cursor, bloco.titulo, 12)
+    cursor = desenharTitulo(doc, cursor, bloco.titulo)
     cursor = desenharTabelaCampos(doc, cursor, bloco.campos)
   }
-  return doc.output('blob')
+  return finalizarDocumento(doc)
 }
 
 // Documentos a gerar — um pro processo e um por sub-recurso com registros —
@@ -102,21 +95,18 @@ function gerarPdfParticipante(documento) {
   const { doc, cursor: inicio } = novoDocumento(documento.titulo)
   let cursor = inicio
   for (const bloco of documento.blocosParticipante) {
-    cursor = desenharTitulo(doc, cursor, bloco.titulo, 12)
+    cursor = desenharTitulo(doc, cursor, bloco.titulo)
     cursor = desenharTabelaCampos(doc, cursor, bloco.campos)
   }
   const { propostas } = documento
-  cursor = desenharTitulo(doc, cursor, `Propostas do participante (${propostas.linhas.length})`, 13)
+  cursor = desenharTitulo(doc, cursor, `Propostas do participante (${propostas.linhas.length})`)
   if (propostas.linhas.length) {
     cursor = desenharTabelaDinamica(doc, cursor, propostas)
     desenharAvisoOmitidas(doc, cursor, propostas.omitidas)
   } else {
-    doc.setFontSize(9)
-    doc.setFont('helvetica', 'italic')
-    doc.text('Nenhuma proposta encontrada', 40, cursor + 4)
-    doc.setFont('helvetica', 'normal')
+    desenharAviso(doc, cursor, 'Nenhuma proposta encontrada')
   }
-  return doc.output('blob')
+  return finalizarDocumento(doc)
 }
 
 // PDF de UMA ata de registro de preço (ver montarAtasRegistroPreco): todos os
@@ -125,11 +115,11 @@ export function gerarPdfAta(ata) {
   const { doc, cursor: inicio } = novoDocumento(ata.titulo)
   let cursor = desenharTabelaCampos(doc, inicio, ata.campos)
   if (ata.itens.linhas.length) {
-    cursor = desenharTitulo(doc, cursor, `Itens da ata (${ata.itens.linhas.length})`, 13)
+    cursor = desenharTitulo(doc, cursor, `Itens da ata (${ata.itens.linhas.length})`)
     cursor = desenharTabelaDinamica(doc, cursor, ata.itens)
     desenharAvisoOmitidas(doc, cursor, ata.itens.omitidas)
   }
-  return doc.output('blob')
+  return finalizarDocumento(doc)
 }
 
 export function listarDocumentosAta(ata) {
