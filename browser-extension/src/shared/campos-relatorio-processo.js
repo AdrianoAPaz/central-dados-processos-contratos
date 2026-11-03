@@ -871,18 +871,6 @@ function acharChave(obj, chaves, prof = 0) {
 // Itens vinculados a uma ocorrência da ata. Colunas iguais às da ata; cada
 // valor é buscado em qualquer nível do item. Se nada for resolvido em nenhum
 // item, a linha traz o JSON cru para análise manual (em vez de só traços).
-// Todos os valores escalares numéricos cujo nome de chave bate com o padrão,
-// em qualquer nível do objeto.
-function acharPorPadrao(obj, padrao, prof = 0, saida = []) {
-  if (!obj || typeof obj !== 'object' || prof > 4) return saida
-  for (const [k, v] of Object.entries(obj)) {
-    if (Array.isArray(v)) continue
-    if (v && typeof v === 'object') acharPorPadrao(v, padrao, prof + 1, saida)
-    else if (v != null && v !== '' && padrao.test(k) && !Number.isNaN(Number(v))) saida.push(Number(v))
-  }
-  return saida
-}
-
 export function montarTabelaItensOcorrencia(itens, ocorrencia) {
   if (!Array.isArray(itens) || !itens.length) return { colunas: [], linhas: [], omitidas: 0 }
   const texto = (v) => (v == null ? '' : String(v))
@@ -891,37 +879,26 @@ export function montarTabelaItensOcorrencia(itens, ocorrencia) {
     if (v == null || v === '' || Number.isNaN(num)) return ''
     return num.toLocaleString('pt-BR', { minimumFractionDigits: n, maximumFractionDigits: n })
   }
-  const CHAVES_ANTERIOR = ['valorUnitarioAnterior', 'valorAnterior', 'precoAnterior', 'valorUnitarioAntigo']
-  const normaliza = (v) => String(v).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-  // Ocorrência de "alteração de preços": o tipo (texto em qualquer campo da
-  // ocorrência) ou o valor unitário anterior nos itens denunciam; colunas
-  // próprias, como na tela "Itens da alteração de preços da ata".
-  const tipoPreco = Object.values(ocorrencia && typeof ocorrencia === 'object' ? ocorrencia : {}).some(
-    (v) => typeof v === 'string' && /altera\w* de preco/.test(normaliza(v)),
-  )
-  if (tipoPreco || itens.some((it) => acharChave(it, CHAVES_ANTERIOR) !== undefined)) {
+  // Ocorrência de "alteração de preços" (`tipoOcorrencia: ALTERACAO_PRECOS`;
+  // o item traz `valorUnitarioAnterior`): colunas próprias, como na tela
+  // "Itens da alteração de preços da ata". Formato confirmado em 2026-11-03
+  // (ocorrencias/{id}/itens): preços e `valorPercentualReajuste` na raiz do
+  // item; número, descrição e saldo no `ataRegistroPrecoItem` aninhado (o
+  // `valorSaldo` da raiz vem sempre 0).
+  const ehPreco =
+    (ocorrencia && ocorrencia.tipoOcorrencia === 'ALTERACAO_PRECOS') ||
+    itens.some((it) => it && (it.valorUnitarioAnterior != null || (it.ataRegistroPrecoOcorrencia && it.ataRegistroPrecoOcorrencia.tipoOcorrencia === 'ALTERACAO_PRECOS')))
+  if (ehPreco) {
     const linhasPreco = itens.map((it) => {
-      const anterior = acharChave(it, CHAVES_ANTERIOR)
-      const novo = acharChave(it, ['valorUnitarioNovo', 'valorNovo', 'precoNovo', 'valorUnitario'])
-      // Reajuste vem do sistema (sem cálculo): qualquer campo com "reajuste",
-      // "percentual" ou "variação" no nome; prefere o primeiro não zero.
-      const candidatos = acharPorPadrao(it, /reajuste|percentual|varia[cç]/i)
-      const reajuste = candidatos.find((n) => n !== 0) ?? candidatos[0]
-      const material = acharChave(it, ['descricaoMaterial', 'materialDescricao']) ?? (it && it.material && it.material.descricao)
+      const item = (it && it.ataRegistroPrecoItem) || {}
+      const gerado = item.processoAdministrativoItemGerado || {}
       return [
-        texto(acharChave(it, ['numeroItem', 'numero', 'item'])),
-        texto(material ?? acharChave(it, ['descricao', 'nome'])),
-        // Saldo: o item da ata aninhado pode trazer 0 noutro nível; prefere o primeiro não zero.
-        decimais(
-          (() => {
-            const c = acharPorPadrao(it, /saldo|dispon/i)
-            return c.find((n) => n !== 0) ?? c[0]
-          })(),
-          3,
-        ),
-        decimais(anterior, 4),
-        decimais(novo, 4),
-        decimais(reajuste, 2),
+        texto(gerado.numero),
+        texto((item.material && item.material.descricao) || (item.materialEspecificacao && item.materialEspecificacao.descricao)),
+        decimais(item.valorSaldo, 3),
+        decimais(it.valorUnitarioAnterior, 4),
+        decimais(it.valorUnitarioNovo, 4),
+        decimais(it.valorPercentualReajuste, 2),
       ]
     })
     if (linhasPreco.some((l) => l.slice(2).some((c) => c !== ''))) {
