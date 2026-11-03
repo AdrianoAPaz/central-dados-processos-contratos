@@ -903,10 +903,12 @@ export function montarTabelaItensOcorrencia(itens, ocorrencia) {
     const linhasPreco = itens.map((it) => {
       const anterior = acharChave(it, CHAVES_ANTERIOR)
       const novo = acharChave(it, ['valorUnitarioNovo', 'valorNovo', 'precoNovo', 'valorUnitario'])
-      let reajuste = acharChave(it, ['percentualReajuste', 'reajuste', 'percentualAlteracao', 'percentual'])
-      if (reajuste === undefined && Number(anterior) > 0 && novo != null && !Number.isNaN(Number(novo))) {
-        reajuste = (Number(novo) / Number(anterior) - 1) * 100
-      }
+      // Reajuste = novo/anterior - 1 (confere com a tela: 61 -> 63,58 = 4,23%);
+      // o campo da API só entra se não der para calcular.
+      const calculavel = Number(anterior) > 0 && novo != null && !Number.isNaN(Number(novo))
+      const reajuste = calculavel
+        ? (Number(novo) / Number(anterior) - 1) * 100
+        : acharChave(it, ['percentualReajuste', 'reajuste', 'percentualAlteracao', 'percentual'])
       const material = acharChave(it, ['descricaoMaterial', 'materialDescricao']) ?? (it && it.material && it.material.descricao)
       return [
         texto(acharChave(it, ['numeroItem', 'numero', 'item'])),
