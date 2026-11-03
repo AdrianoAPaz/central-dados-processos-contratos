@@ -133,17 +133,19 @@ export function gerarPdfAta(ata) {
     cursor = desenharTabelaDinamica(doc, cursor, ata.itens)
     cursor = desenharAvisoOmitidas(doc, cursor, ata.itens.omitidas)
   }
-  if (ata.ocorrencias && ata.ocorrencias.linhas.length) {
-    cursor = desenharTitulo(doc, cursor, `Ocorrências da ata (${ata.ocorrencias.linhas.length})`)
-    cursor = desenharTabelaDinamica(doc, cursor, ata.ocorrencias)
-    cursor = desenharAvisoOmitidas(doc, cursor, ata.ocorrencias.omitidas)
-  }
   desenharTabelaAnexados(doc, cursor, ata.tabelaAnexados)
   return finalizarDocumento(doc)
 }
 
+// PDF da ata e, se ela tiver ocorrências (adendos), o relatório
+// "ocorrencias" na mesma pasta.
 export function listarDocumentosAta(ata) {
-  return [{ nome: `${slug(ata.titulo)}.pdf`, gerar: () => gerarPdfAta(ata) }]
+  const documentos = [{ nome: `${slug(ata.titulo)}.pdf`, gerar: () => gerarPdfAta(ata) }]
+  if (ata.ocorrencias.length) {
+    const titulo = `ocorrências da ${ata.titulo}`
+    documentos.push({ nome: `${slug(titulo)}.pdf`, gerar: () => gerarPdfSubrecurso({ titulo, blocos: ata.ocorrencias }) })
+  }
+  return documentos
 }
 
 // Processo de registro de preço ainda sem nenhuma ata: a pasta
