@@ -902,7 +902,14 @@ export function montarAtasRegistroPreco(p) {
       // Sem nenhuma ocorrência, o documento não sai.
       ocorrencias: (Array.isArray(raw && raw.ocorrencias) ? raw.ocorrencias : []).map((oc, i) => ({
         titulo: `ocorrência ${i + 1}`,
-        campos: camposDe(oc, p, []),
+        campos: camposDe(oc, p, ['itensOcorrencia', 'itens', 'itensAta']),
+        // Itens vinculados à ocorrência, mesma tabela dos itens da ata (o
+        // item pode vir aninhado em `itemAta`).
+        itens: montarTabelaItensAta(
+          (Array.isArray(oc && oc.itensOcorrencia) ? oc.itensOcorrencia : []).map((it) =>
+            it && typeof it.itemAta === 'object' && it.itemAta ? { ...it.itemAta, ...it } : it,
+          ),
+        ),
       })),
       tabelaAnexados: montarTabelaHistoricoAnexos(raw && raw.arquivos),
       anexos: (Array.isArray(raw && raw.arquivos) ? raw.arquivos : [])

@@ -1100,6 +1100,18 @@ async function completarAtasProcesso(sessao, processoId, atas) {
     // Ocorrências da ata (tela "Ocorrências"); caminho não confirmado — falha
     // deixa a lista vazia.
     completa.ocorrencias = await buscarListaPaginada(sessao, `${SUBRECURSOS_PROCESSO.atas}/${limparId(ata.id)}/ocorrencias`).catch(() => [])
+    // Itens vinculados a cada ocorrência: vêm inline (`itens`) quando a API
+    // já os devolve; senão tenta `ocorrencias/{id}/itens` (caminho não
+    // confirmado — falha deixa a ocorrência sem itens, em `itensOcorrencia`).
+    for (const oc of completa.ocorrencias) {
+      if (!oc || typeof oc !== 'object') continue
+      const inline = ['itens', 'itensOcorrencia', 'itensAta'].map((k) => oc[k]).find((v) => Array.isArray(v) && v.length)
+      oc.itensOcorrencia =
+        inline ||
+        (oc.id != null
+          ? await buscarListaPaginada(sessao, `${SUBRECURSOS_PROCESSO.atas}/${limparId(ata.id)}/ocorrencias/${limparId(oc.id)}/itens`).catch(() => [])
+          : [])
+    }
     completas.push(completa)
   }
   return completas
