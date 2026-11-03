@@ -143,10 +143,20 @@ export function listarDocumentosAta(ata) {
 
 // Um PDF por ocorrência (adendo) da ata, pra pasta "Ocorrências ata N" dentro
 // da subpasta da ata. Ata sem ocorrências: lista vazia (a pasta não sai).
+function gerarPdfOcorrenciaAta(titulo, bloco) {
+  const { doc, cursor: inicio } = novoDocumento(titulo)
+  let cursor = desenharTitulo(doc, inicio, bloco.titulo)
+  cursor = desenharTabelaCampos(doc, cursor, bloco.campos)
+  cursor = desenharTitulo(doc, cursor, `Itens da ocorrência (${bloco.itens.linhas.length})`)
+  if (bloco.itens.linhas.length) desenharTabelaDinamica(doc, cursor, bloco.itens)
+  else desenharAviso(doc, cursor, 'Nenhum item vinculado a esta ocorrência')
+  return finalizarDocumento(doc)
+}
+
 export function listarDocumentosOcorrenciasAta(ata) {
   return ata.ocorrencias.map((bloco, i) => {
     const titulo = `ocorrência ${i + 1} da ${ata.titulo}`
-    return { nome: `${slug(titulo)}.pdf`, gerar: () => gerarPdfSubrecurso({ titulo, blocos: [bloco] }) }
+    return { nome: `${slug(titulo)}.pdf`, gerar: () => gerarPdfOcorrenciaAta(titulo, bloco) }
   })
 }
 
