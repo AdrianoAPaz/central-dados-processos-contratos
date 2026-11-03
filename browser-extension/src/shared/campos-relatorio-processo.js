@@ -897,7 +897,13 @@ export function montarAtasRegistroPreco(p) {
       // separadores nem R$ — formatados como "R$ 1.234,56".
       campos: camposAta(raw, p),
       itens: montarTabelaItensAta(itens),
-      ocorrencias: montarTabelaGenerica(Array.isArray(raw && raw.ocorrencias) ? raw.ocorrencias : [], [], p),
+      // Ocorrências são adendos da ata: relatório próprio na pasta dela, um
+      // bloco por ocorrência com todos os campos (pedido do usuário, 2026-11-03).
+      // Sem nenhuma ocorrência, o documento não sai.
+      ocorrencias: (Array.isArray(raw && raw.ocorrencias) ? raw.ocorrencias : []).map((oc, i) => ({
+        titulo: `ocorrência ${i + 1}`,
+        campos: camposDe(oc, p, []),
+      })),
       tabelaAnexados: montarTabelaHistoricoAnexos(raw && raw.arquivos),
       anexos: (Array.isArray(raw && raw.arquivos) ? raw.arquivos : [])
         .map((a) => ({ ...a, origem: `Ata ${numero}` }))
