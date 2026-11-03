@@ -868,6 +868,20 @@ function acharChave(obj, chaves, prof = 0) {
   return undefined
 }
 
+// Cópia da lista em ordem crescente do número devolvido por `numeroDe`; quem
+// não tem número válido vai pro fim, na ordem original.
+function ordenarPorNumero(lista, numeroDe) {
+  const numero = (x) => {
+    const v = numeroDe(x)
+    const n = v == null || v === '' ? NaN : Number(v)
+    return Number.isNaN(n) ? Infinity : n
+  }
+  return lista
+    .map((x, i) => ({ x, n: numero(x), i }))
+    .sort((a, b) => (a.n === b.n ? a.i - b.i : a.n < b.n ? -1 : 1))
+    .map((e) => e.x)
+}
+
 // Itens vinculados a uma ocorrência da ata. Colunas iguais às da ata; cada
 // valor é buscado em qualquer nível do item. Se nada for resolvido em nenhum
 // item, a linha traz o JSON cru para análise manual (em vez de só traços).
@@ -910,7 +924,7 @@ export function montarTabelaItensOcorrencia(itens, ocorrencia) {
       }
     }
   }
-  const linhas = itens.map((it) => {
+  const linhas = ordenarPorNumero(itens, (it) => acharChave(it, ['numeroItem', 'numero', 'item'])).map((it) => {
     const material = acharChave(it, ['descricaoMaterial', 'materialDescricao']) ?? (it && it.material && it.material.descricao)
     const linha = [
       texto(acharChave(it, ['numeroItem', 'numero', 'item'])),
@@ -982,7 +996,9 @@ export function montarAtasRegistroPreco(p) {
       // Ocorrências são adendos da ata: relatório próprio na pasta dela, um
       // bloco por ocorrência com todos os campos (pedido do usuário, 2026-11-03).
       // Sem nenhuma ocorrência, o documento não sai.
-      ocorrencias: (Array.isArray(raw && raw.ocorrencias) ? raw.ocorrencias : []).map((oc, i) => ({
+      // Em ordem crescente de `sequencial` (a API não garante a ordem), pra
+      // "ocorrência 1, 2, 3…" seguir a numeração da tela.
+      ocorrencias: ordenarPorNumero(Array.isArray(raw && raw.ocorrencias) ? raw.ocorrencias : [], (oc) => oc && oc.sequencial).map((oc, i) => ({
         titulo: `ocorrência ${i + 1}`,
         campos: camposDe(oc, p, ['itensOcorrencia', 'itens', 'itensAta']),
         // Itens vinculados à ocorrência (formato não confirmado: busca tolerante).
