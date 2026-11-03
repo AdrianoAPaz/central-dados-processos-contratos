@@ -19,6 +19,7 @@ import { criarZip } from '../shared/zip.js'
 import { formatarTitulo } from '../shared/titulo.js'
 import {
   listarDocumentosAta,
+  listarDocumentosOcorrenciasAta,
   listarDocumentosParticipantes,
   listarDocumentosProcesso,
   listarDocumentosSemAtas,
@@ -123,6 +124,18 @@ async function montarPacoteRelatorio(processo, anexos, container) {
           rotulo: `${nomePasta} — `,
         })),
       )
+      // Ocorrências (adendos) agrupadas na pasta "Ocorrências ata N".
+      if (ata.ocorrencias.length) {
+        baixados.push(
+          ...(await coletarArquivosPacote({
+            documentos: listarDocumentosOcorrenciasAta(ata),
+            anexos: [],
+            prefixo: `${prefixoAtas}${nomePasta}/Ocorrências ata ${numeroPasta}/`,
+            lista,
+            rotulo: `${nomePasta} — `,
+          })),
+        )
+      }
     }
   }
 

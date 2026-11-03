@@ -137,15 +137,17 @@ export function gerarPdfAta(ata) {
   return finalizarDocumento(doc)
 }
 
-// PDF da ata e, se ela tiver ocorrências (adendos), o relatório
-// "ocorrencias" na mesma pasta.
 export function listarDocumentosAta(ata) {
-  const documentos = [{ nome: `${slug(ata.titulo)}.pdf`, gerar: () => gerarPdfAta(ata) }]
-  if (ata.ocorrencias.length) {
-    const titulo = `ocorrências da ${ata.titulo}`
-    documentos.push({ nome: `${slug(titulo)}.pdf`, gerar: () => gerarPdfSubrecurso({ titulo, blocos: ata.ocorrencias }) })
-  }
-  return documentos
+  return [{ nome: `${slug(ata.titulo)}.pdf`, gerar: () => gerarPdfAta(ata) }]
+}
+
+// Um PDF por ocorrência (adendo) da ata, pra pasta "Ocorrências ata N" dentro
+// da subpasta da ata. Ata sem ocorrências: lista vazia (a pasta não sai).
+export function listarDocumentosOcorrenciasAta(ata) {
+  return ata.ocorrencias.map((bloco, i) => {
+    const titulo = `ocorrência ${i + 1} da ${ata.titulo}`
+    return { nome: `${slug(titulo)}.pdf`, gerar: () => gerarPdfSubrecurso({ titulo, blocos: [bloco] }) }
+  })
 }
 
 // Processo de registro de preço ainda sem nenhuma ata: a pasta
