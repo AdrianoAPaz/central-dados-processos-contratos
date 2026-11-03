@@ -1,4 +1,4 @@
-import { ehRegistroPreco } from '../shared/campos-relatorio-processo.js'
+import { ehRegistroPreco, exercicioDoProcesso } from '../shared/campos-relatorio-processo.js'
 
 const statusEl = document.getElementById('status')
 const statusTextoEl = document.getElementById('statusTexto')
@@ -657,7 +657,7 @@ function renderProcessos(lista, aproximado) {
   }
   for (const p of lista) {
     const numero = p.numeroProcesso != null
-      ? (contextoCompras.exercicio ? `${p.numeroProcesso}/${contextoCompras.exercicio}` : String(p.numeroProcesso))
+      ? ((contextoCompras.exercicio || exercicioDoProcesso(p)) ? `${p.numeroProcesso}/${contextoCompras.exercicio || exercicioDoProcesso(p)}` : String(p.numeroProcesso))
       : `Id ${p.id}`
     const situacao = p.situacaoDesc || ''
     const modalidade = (p.tipoObjeto && (p.tipoObjeto.tipoDescricao || p.tipoObjeto.descricao)) || ''
@@ -715,7 +715,9 @@ async function carregarProcessoCompleto(processo) {
     processoCompleto: {
       ...processo,
       ...(detalhes.processo || {}),
-      exercicio: contextoCompras.exercicio,
+      // O exercício vem da URL da aba do Compras; se o contexto não foi capturado
+      // (ex.: extensão recarregada com a aba já aberta), cai no do próprio processo.
+      exercicio: contextoCompras.exercicio || exercicioDoProcesso(detalhes.processo) || exercicioDoProcesso(processo),
       entidadeToken: contextoCompras.entidade,
       subrecursos: detalhes.subrecursos,
     },

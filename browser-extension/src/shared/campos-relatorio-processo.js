@@ -251,9 +251,22 @@ export function montarTabelaAnexadosProcesso(p) {
   return montarTabelaHistoricoAnexos(subrecurso(p, 'anexos'))
 }
 
+// Exercício (ano) do processo: o `exercicio` que a extensão grava a partir da URL
+// do Compras e, na falta dele, o do próprio registro (`parametroExercicio` ou o
+// ano da data do processo) — assim o número não perde o "/2026" quando o
+// contexto da aba não foi capturado.
+export function exercicioDoProcesso(p) {
+  if (!p || typeof p !== 'object') return ''
+  if (p.exercicio) return String(p.exercicio)
+  if (p.parametroExercicio && p.parametroExercicio.exercicio) return String(p.parametroExercicio.exercicio)
+  const ano = typeof p.dataProcesso === 'string' ? p.dataProcesso.match(/^(\d{4})-/) : null
+  return ano ? ano[1] : ''
+}
+
 export function numeroProcesso(p) {
   if (p.numeroProcesso == null) return p.id != null ? `id ${p.id}` : ''
-  return p.exercicio ? `${p.numeroProcesso}/${p.exercicio}` : String(p.numeroProcesso)
+  const exercicio = exercicioDoProcesso(p)
+  return exercicio ? `${p.numeroProcesso}/${exercicio}` : String(p.numeroProcesso)
 }
 
 // Descrição do documento — "processo 45/2026", mesmo padrão de
