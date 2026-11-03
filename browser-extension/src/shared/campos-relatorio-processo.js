@@ -341,7 +341,12 @@ function descricaoTipoObjeto(tipoObjeto) {
   if (typeof tipoObjeto === 'object') {
     return String(tipoObjeto.tipoDescricao || tipoObjeto.descricao || tipoObjeto.nome || tipoObjeto.tipo || '')
   }
-  const texto = String(tipoObjeto).replace(/_/g, ' ').toLowerCase()
+  return textoDeEnum(tipoObjeto)
+}
+
+// Enum em texto (`PROCESSO_HOMOLOGADO`) vira palavras ("Processo homologado").
+function textoDeEnum(valor) {
+  const texto = String(valor).replace(/_/g, ' ').toLowerCase()
   return texto.charAt(0).toUpperCase() + texto.slice(1)
 }
 
@@ -992,15 +997,36 @@ function camposAta(raw, p) {
   // (JSON cru no PDF); ela já sai no documento próprio de ocorrências da ata.
   const chaves = Object.keys(raw || {}).filter((k) => k !== 'itensAta' && k !== 'ocorrencias' && !/^ocorrenciaProrrogacao/i.test(k))
   const documento = documentoFornecedor(raw)
+  const doProcesso = camposDoProcessoNaAta(p).filter((c) => !chaves.some((k) => normalizarChave(k) === normalizarChave(c.label)))
   const campos = []
   chaves.forEach((chave) => {
     const valor = raw[chave]
-    const texto = valorProcesso(chave, valor, p)
+    // Origem vem como código (`PROCESSO_HOMOLOGADO`); a tela mostra por extenso.
+    const origemEnum = chave === 'origem' && typeof valor === 'string' && /^[A-Z][A-Z_]*$/.test(valor)
+    const texto = origemEnum ? textoDeEnum(valor) : valorProcesso(chave, valor, p)
     const monetario = ehChaveMonetaria(chave) && valor != null && valor !== '' && !Number.isNaN(Number(valor))
     campos.push({ label: formatarChave(chave), valor: monetario ? `R$ ${formatarValor(valor)}` : texto })
     if (chave === 'fornecedor' && documento) campos.push({ label: 'CPF/CNPJ do fornecedor', valor: documento })
+    if (chave === 'processoAdministrativo') campos.push(...doProcesso)
   })
+  if (!chaves.includes('processoAdministrativo')) campos.push(...doProcesso)
   return campos
+}
+
+// Dados do processo que a tela de edição da ata mostra ao lado do nº do processo
+// (forma de contratação, nº e ano da licitação, modalidade, tipo de objeto) e
+// que a ata em si não traz — vêm do processo e da `contratacao` dele
+// (conferência do processo 76/2025, 2026-11-03). Campo sem valor não entra.
+function camposDoProcessoNaAta(p) {
+  const c = p && p.contratacao && typeof p.contratacao === 'object' ? p.contratacao : {}
+  const lista = [
+    { label: 'Forma de contratação', valor: c.formaContratacaoDesc || (typeof c.formaContratacao === 'string' ? textoDeEnum(c.formaContratacao) : rotuloCadastro(c.formaContratacao)) },
+    { label: 'N° da licitação', valor: c.numeroSequencial },
+    { label: 'Ano da licitação', valor: c.anoSequencial },
+    { label: 'Modalidade', valor: rotuloCadastro(c.modalidade) },
+    { label: 'Tipo de objeto', valor: descricaoTipoObjeto(p && p.tipoObjeto) },
+  ]
+  return lista.filter((campo) => campo.valor != null && campo.valor !== '').map((campo) => ({ label: campo.label, valor: String(campo.valor) }))
 }
 
 // Uma entrada por ata: título do PDF, campos (todos os que a API devolveu),
