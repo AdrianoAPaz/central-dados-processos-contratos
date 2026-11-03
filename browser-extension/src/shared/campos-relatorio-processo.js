@@ -128,6 +128,15 @@ function valorObjetoProcesso(chave, valor, p) {
   if (/^ataCancelada/i.test(chave) && valor.numeroAta != null) {
     return valor.anoAta != null ? `${valor.numeroAta}/${valor.anoAta}` : String(valor.numeroAta)
   }
+  // `ataRegistroPreco` da ocorrência: a ata dona dela, só com id e flags —
+  // mostra o número ("76/2025"), pelo id, nas atas do processo (2026-11-03,
+  // processo 76/2025: saía o JSON cru). Sem a ata na lista, segue o JSON cru.
+  if (/^ataRegistroPreco$/i.test(chave)) {
+    if (valor.numeroAta != null) return valor.anoAta != null ? `${valor.numeroAta}/${valor.anoAta}` : String(valor.numeroAta)
+    const atas = subrecurso(p, 'atas')
+    const indice = valor.id != null ? atas.findIndex((a) => a && String(a.id) === String(valor.id)) : -1
+    if (indice >= 0) return numeroAta(atas[indice], indice)
+  }
   // `atoFinalBO` do histórico: o ato final que gerou a mudança de status.
   if (/^atoFinal/i.test(chave) && (valor.tipoAtoDesc || valor.tipoAto)) return String(valor.tipoAtoDesc || valor.tipoAto)
   // `statusAnterior` do histórico: o registro de histórico anterior inteiro —
@@ -213,7 +222,7 @@ export const SUBRECURSOS_EM_DOCUMENTO = [
   { chave: 'publicacoes', rotulo: 'publicações', singular: 'publicação' },
   { chave: 'impugnacoes', rotulo: 'impugnações', singular: 'impugnação' },
   { chave: 'documentosexigidos', rotulo: 'documentos exigidos', singular: 'documento exigido' },
-  { chave: 'atas', rotulo: 'atas de registro de preços', singular: 'ata', ocultar: ['itensAta', 'ocorrencias'] },
+  { chave: 'atas', rotulo: 'atas de registro de preços', singular: 'ata', ocultar: ['itensAta', 'ocorrencias', 'ocorrenciaProrrogacaoQuantitativo'] },
   { chave: 'textos', rotulo: 'textos', singular: 'texto', vazio: MENSAGEM_SEM_TEXTOS },
 ]
 
@@ -291,6 +300,16 @@ const CHAVES_PRINCIPAIS = new Set([
   'formaJulgamento',
 ])
 
+// Listas do processo que o relatório já mostra em tabelas próprias (itens,
+// lotes) ou que vêm vazias na maioria dos processos: com valor vazio saem como
+// "--" logo acima da tabela de itens e dão a impressão de que não há itens.
+// Preenchidas continuam aparecendo. Chaves já normalizadas (normalizarChave).
+const CHAVES_OCULTAS_SE_VAZIAS = new Set(['itens', 'lotes', 'solicitacoes', 'contratacoesvinculadas', 'organogramasautorizados'])
+
+function valorVazio(valor) {
+  return valor == null || valor === '' || (Array.isArray(valor) && !valor.length)
+}
+
 // Rótulos que a tela do Compras usa (formulário "Editando processo
 // administrativo") para campos cujo nome na API é diferente.
 const ROTULOS_PROCESSO = {
@@ -340,6 +359,7 @@ export function montarCamposProcesso(p) {
   // as informações") — depois dos principais, na ordem em que vierem.
   const demais = Object.entries(p)
     .filter(([chave]) => !CHAVES_PRINCIPAIS.has(chave))
+    .filter(([chave, valor]) => !(CHAVES_OCULTAS_SE_VAZIAS.has(normalizarChave(chave)) && valorVazio(valor)))
     .map(([chave, valor]) => ({ label: ROTULOS_PROCESSO[chave] || formatarChave(chave), valor: valorProcesso(chave, valor, p) }))
   return [...principais, ...demais]
 }
@@ -420,7 +440,9 @@ export function montarTabelaGenerica(registrosOriginais, excluir = [], p = null)
   // as 8 colunas e deixaram valor unitário/total de fora.
   const daTela = presentes.filter((c) => !preferidas.includes(c) && /^(unidade|valor|vl|preco|total|situacao)/i.test(c))
   const restantes = presentes.filter((c) => !preferidas.includes(c) && !daTela.includes(c))
-  const ordenadas = [...preferidas, ...daTela, ...restantes]
+  // `situacaoLances` e `situacaoLancesDesc` (código e texto) viravam duas
+  // colunas iguais; fica só a descrição. O Excel mantém as duas.
+  const ordenadas = [...preferidas, ...daTela, ...restantes].filter((c) => !presentes.includes(`${c}Desc`))
   const escolhidas = ordenadas.slice(0, MAX_COLUNAS_TABELA)
 
   return {
@@ -966,7 +988,9 @@ function documentoFornecedor(raw) {
 // Campos da ata na ordem da API, com valores monetários formatados
 // ("R$ 1.234,56") e o CPF/CNPJ do fornecedor logo depois dele.
 function camposAta(raw, p) {
-  const chaves = Object.keys(raw || {}).filter((k) => k !== 'itensAta' && k !== 'ocorrencias')
+  // `ocorrenciaProrrogacaoQuantitativo` é a ocorrência de prorrogação inteira
+  // (JSON cru no PDF); ela já sai no documento próprio de ocorrências da ata.
+  const chaves = Object.keys(raw || {}).filter((k) => k !== 'itensAta' && k !== 'ocorrencias' && !/^ocorrenciaProrrogacao/i.test(k))
   const documento = documentoFornecedor(raw)
   const campos = []
   chaves.forEach((chave) => {
