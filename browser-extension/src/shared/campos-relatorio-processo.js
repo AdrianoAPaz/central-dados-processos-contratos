@@ -855,6 +855,111 @@ export function montarTabelaItensAta(itens) {
   }
 }
 
+// Primeiro valor da chave em qualquer nível do objeto (até 4 níveis). Os itens
+// da ocorrência não têm formato confirmado (o item da ata pode vir aninhado em
+// `itemAta`, `item` etc.), então procura em vez de assumir o caminho.
+function acharChave(obj, chaves, prof = 0) {
+  if (!obj || typeof obj !== 'object' || prof > 4) return undefined
+  for (const k of chaves) if (obj[k] != null && obj[k] !== '' && typeof obj[k] !== 'object') return obj[k]
+  for (const v of Object.values(obj)) {
+    const r = Array.isArray(v) ? undefined : acharChave(v, chaves, prof + 1)
+    if (r !== undefined) return r
+  }
+  return undefined
+}
+
+// Itens vinculados a uma ocorrência da ata. Colunas iguais às da ata; cada
+// valor é buscado em qualquer nível do item. Se nada for resolvido em nenhum
+// item, a linha traz o JSON cru para análise manual (em vez de só traços).
+// Todos os valores escalares numéricos cujo nome de chave bate com o padrão,
+// em qualquer nível do objeto.
+function acharPorPadrao(obj, padrao, prof = 0, saida = []) {
+  if (!obj || typeof obj !== 'object' || prof > 4) return saida
+  for (const [k, v] of Object.entries(obj)) {
+    if (Array.isArray(v)) continue
+    if (v && typeof v === 'object') acharPorPadrao(v, padrao, prof + 1, saida)
+    else if (v != null && v !== '' && padrao.test(k) && !Number.isNaN(Number(v))) saida.push(Number(v))
+  }
+  return saida
+}
+
+export function montarTabelaItensOcorrencia(itens, ocorrencia) {
+  if (!Array.isArray(itens) || !itens.length) return { colunas: [], linhas: [], omitidas: 0 }
+  const texto = (v) => (v == null ? '' : String(v))
+  const decimais = (v, n) => {
+    const num = Number(v)
+    if (v == null || v === '' || Number.isNaN(num)) return ''
+    return num.toLocaleString('pt-BR', { minimumFractionDigits: n, maximumFractionDigits: n })
+  }
+  const CHAVES_ANTERIOR = ['valorUnitarioAnterior', 'valorAnterior', 'precoAnterior', 'valorUnitarioAntigo']
+  const normaliza = (v) => String(v).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  // Ocorrência de "alteração de preços": o tipo (texto em qualquer campo da
+  // ocorrência) ou o valor unitário anterior nos itens denunciam; colunas
+  // próprias, como na tela "Itens da alteração de preços da ata".
+  const tipoPreco = Object.values(ocorrencia && typeof ocorrencia === 'object' ? ocorrencia : {}).some(
+    (v) => typeof v === 'string' && /altera\w* de preco/.test(normaliza(v)),
+  )
+  if (tipoPreco || itens.some((it) => acharChave(it, CHAVES_ANTERIOR) !== undefined)) {
+    const linhasPreco = itens.map((it) => {
+      const anterior = acharChave(it, CHAVES_ANTERIOR)
+      const novo = acharChave(it, ['valorUnitarioNovo', 'valorNovo', 'precoNovo', 'valorUnitario'])
+      // Reajuste vem do sistema (sem cálculo): qualquer campo com "reajuste",
+      // "percentual" ou "variação" no nome; prefere o primeiro não zero.
+      const candidatos = acharPorPadrao(it, /reajuste|percentual|varia[cç]/i)
+      const reajuste = candidatos.find((n) => n !== 0) ?? candidatos[0]
+      const material = acharChave(it, ['descricaoMaterial', 'materialDescricao']) ?? (it && it.material && it.material.descricao)
+      return [
+        texto(acharChave(it, ['numeroItem', 'numero', 'item'])),
+        texto(material ?? acharChave(it, ['descricao', 'nome'])),
+        // Saldo: o item da ata aninhado pode trazer 0 noutro nível; prefere o primeiro não zero.
+        decimais(
+          (() => {
+            const c = acharPorPadrao(it, /saldo|dispon/i)
+            return c.find((n) => n !== 0) ?? c[0]
+          })(),
+          3,
+        ),
+        decimais(anterior, 4),
+        decimais(novo, 4),
+        decimais(reajuste, 2),
+      ]
+    })
+    if (linhasPreco.some((l) => l.slice(2).some((c) => c !== ''))) {
+      linhasPreco.sort((a, b) => Number(a[0]) - Number(b[0]))
+      return {
+        colunas: ['Item', 'Descrição', 'Saldo disponível', 'Valor unitário anterior (R$)', 'Valor unitário novo (R$)', 'Reajuste (%)'],
+        linhas: linhasPreco,
+        omitidas: 0,
+      }
+    }
+  }
+  const linhas = itens.map((it) => {
+    const material = acharChave(it, ['descricaoMaterial', 'materialDescricao']) ?? (it && it.material && it.material.descricao)
+    const linha = [
+      texto(acharChave(it, ['numeroItem', 'numero', 'item'])),
+      texto(material ?? acharChave(it, ['descricao', 'nome'])),
+      texto(acharChave(it, ['descricaoMarca', 'marca'])),
+      texto(acharChave(it, ['simbolo', 'unidade', 'unidadeCompra'])),
+      formatarQuantidade(acharChave(it, ['quantidade', 'quantidadeItem', 'qtde'])),
+      formatarValor(acharChave(it, ['valorUnitario'])),
+      formatarValor(acharChave(it, ['valorTotal'])),
+      formatarQuantidade(acharChave(it, ['quantidadeContratada'])),
+      formatarQuantidade(acharChave(it, ['valorSaldo', 'saldo'])),
+      texto(acharChave(it, ['situacaoDesc', 'situacao'])),
+    ]
+    return linha
+  })
+  const resolvido = linhas.some((l) => l.some((c) => c !== '' && c !== '-'))
+  if (!resolvido) {
+    return { colunas: ['Item (dados brutos)'], linhas: itens.map((it) => [JSON.stringify(it)]), omitidas: 0 }
+  }
+  return {
+    colunas: ['Item', 'Material', 'Marca', 'Unidade', 'Quantidade', 'Valor unitário (R$)', 'Valor total (R$)', 'Qtd. contratada', 'Saldo (qtd.)', 'Situação'],
+    linhas,
+    omitidas: 0,
+  }
+}
+
 // CPF/CNPJ do fornecedor da ata: a lista de atas da tela mostra "NOME (CNPJ)",
 // mas o relatório só trazia o nome. O nome do campo na API não foi mapeado,
 // então tenta os lugares usuais; sem nenhum, não acrescenta o campo.
@@ -903,13 +1008,8 @@ export function montarAtasRegistroPreco(p) {
       ocorrencias: (Array.isArray(raw && raw.ocorrencias) ? raw.ocorrencias : []).map((oc, i) => ({
         titulo: `ocorrência ${i + 1}`,
         campos: camposDe(oc, p, ['itensOcorrencia', 'itens', 'itensAta']),
-        // Itens vinculados à ocorrência, mesma tabela dos itens da ata (o
-        // item pode vir aninhado em `itemAta`).
-        itens: montarTabelaItensAta(
-          (Array.isArray(oc && oc.itensOcorrencia) ? oc.itensOcorrencia : []).map((it) =>
-            it && typeof it.itemAta === 'object' && it.itemAta ? { ...it.itemAta, ...it } : it,
-          ),
-        ),
+        // Itens vinculados à ocorrência (formato não confirmado: busca tolerante).
+        itens: montarTabelaItensOcorrencia(Array.isArray(oc && oc.itensOcorrencia) ? oc.itensOcorrencia : [], oc),
       })),
       tabelaAnexados: montarTabelaHistoricoAnexos(raw && raw.arquivos),
       anexos: (Array.isArray(raw && raw.arquivos) ? raw.arquivos : [])
