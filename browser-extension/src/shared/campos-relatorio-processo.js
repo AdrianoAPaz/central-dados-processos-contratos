@@ -871,6 +871,18 @@ function acharChave(obj, chaves, prof = 0) {
 // Itens vinculados a uma ocorrência da ata. Colunas iguais às da ata; cada
 // valor é buscado em qualquer nível do item. Se nada for resolvido em nenhum
 // item, a linha traz o JSON cru para análise manual (em vez de só traços).
+// Todos os valores escalares numéricos cujo nome de chave bate com o padrão,
+// em qualquer nível do objeto.
+function acharPorPadrao(obj, padrao, prof = 0, saida = []) {
+  if (!obj || typeof obj !== 'object' || prof > 4) return saida
+  for (const [k, v] of Object.entries(obj)) {
+    if (Array.isArray(v)) continue
+    if (v && typeof v === 'object') acharPorPadrao(v, padrao, prof + 1, saida)
+    else if (v != null && v !== '' && padrao.test(k) && !Number.isNaN(Number(v))) saida.push(Number(v))
+  }
+  return saida
+}
+
 export function montarTabelaItensOcorrencia(itens, ocorrencia) {
   if (!Array.isArray(itens) || !itens.length) return { colunas: [], linhas: [], omitidas: 0 }
   const texto = (v) => (v == null ? '' : String(v))
@@ -899,7 +911,14 @@ export function montarTabelaItensOcorrencia(itens, ocorrencia) {
       return [
         texto(acharChave(it, ['numeroItem', 'numero', 'item'])),
         texto(material ?? acharChave(it, ['descricao', 'nome'])),
-        decimais(acharChave(it, ['saldoDisponivel', 'valorSaldo', 'saldo', 'quantidadeSaldo']), 3),
+        // Saldo: o item da ata aninhado pode trazer 0 noutro nível; prefere o primeiro não zero.
+        decimais(
+          (() => {
+            const c = acharPorPadrao(it, /saldo|dispon/i)
+            return c.find((n) => n !== 0) ?? c[0]
+          })(),
+          3,
+        ),
         decimais(anterior, 4),
         decimais(novo, 4),
         decimais(reajuste, 2),
