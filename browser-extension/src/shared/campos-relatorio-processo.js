@@ -871,9 +871,49 @@ function acharChave(obj, chaves, prof = 0) {
 // Itens vinculados a uma ocorrência da ata. Colunas iguais às da ata; cada
 // valor é buscado em qualquer nível do item. Se nada for resolvido em nenhum
 // item, a linha traz o JSON cru para análise manual (em vez de só traços).
-export function montarTabelaItensOcorrencia(itens) {
+export function montarTabelaItensOcorrencia(itens, ocorrencia) {
   if (!Array.isArray(itens) || !itens.length) return { colunas: [], linhas: [], omitidas: 0 }
   const texto = (v) => (v == null ? '' : String(v))
+  const decimais = (v, n) => {
+    const num = Number(v)
+    if (v == null || v === '' || Number.isNaN(num)) return ''
+    return num.toLocaleString('pt-BR', { minimumFractionDigits: n, maximumFractionDigits: n })
+  }
+  const CHAVES_ANTERIOR = ['valorUnitarioAnterior', 'valorAnterior', 'precoAnterior', 'valorUnitarioAntigo']
+  const normaliza = (v) => String(v).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  // Ocorrência de "alteração de preços": o tipo (texto em qualquer campo da
+  // ocorrência) ou o valor unitário anterior nos itens denunciam; colunas
+  // próprias, como na tela "Itens da alteração de preços da ata".
+  const tipoPreco = Object.values(ocorrencia && typeof ocorrencia === 'object' ? ocorrencia : {}).some(
+    (v) => typeof v === 'string' && /altera\w* de preco/.test(normaliza(v)),
+  )
+  if (tipoPreco || itens.some((it) => acharChave(it, CHAVES_ANTERIOR) !== undefined)) {
+    const linhasPreco = itens.map((it) => {
+      const anterior = acharChave(it, CHAVES_ANTERIOR)
+      const novo = acharChave(it, ['valorUnitarioNovo', 'valorNovo', 'precoNovo', 'valorUnitario'])
+      let reajuste = acharChave(it, ['percentualReajuste', 'reajuste', 'percentualAlteracao', 'percentual'])
+      if (reajuste === undefined && Number(anterior) > 0 && novo != null && !Number.isNaN(Number(novo))) {
+        reajuste = (Number(novo) / Number(anterior) - 1) * 100
+      }
+      const material = acharChave(it, ['descricaoMaterial', 'materialDescricao']) ?? (it && it.material && it.material.descricao)
+      return [
+        texto(acharChave(it, ['numeroItem', 'numero', 'item'])),
+        texto(material ?? acharChave(it, ['descricao', 'nome'])),
+        decimais(acharChave(it, ['saldoDisponivel', 'valorSaldo', 'saldo', 'quantidadeSaldo']), 3),
+        decimais(anterior, 4),
+        decimais(novo, 4),
+        decimais(reajuste, 2),
+      ]
+    })
+    if (linhasPreco.some((l) => l.slice(2).some((c) => c !== ''))) {
+      linhasPreco.sort((a, b) => Number(a[0]) - Number(b[0]))
+      return {
+        colunas: ['Item', 'Descrição', 'Saldo disponível', 'Valor unitário anterior (R$)', 'Valor unitário novo (R$)', 'Reajuste (%)'],
+        linhas: linhasPreco,
+        omitidas: 0,
+      }
+    }
+  }
   const linhas = itens.map((it) => {
     const material = acharChave(it, ['descricaoMaterial', 'materialDescricao']) ?? (it && it.material && it.material.descricao)
     const linha = [
@@ -950,7 +990,7 @@ export function montarAtasRegistroPreco(p) {
         titulo: `ocorrência ${i + 1}`,
         campos: camposDe(oc, p, ['itensOcorrencia', 'itens', 'itensAta']),
         // Itens vinculados à ocorrência (formato não confirmado: busca tolerante).
-        itens: montarTabelaItensOcorrencia(Array.isArray(oc && oc.itensOcorrencia) ? oc.itensOcorrencia : []),
+        itens: montarTabelaItensOcorrencia(Array.isArray(oc && oc.itensOcorrencia) ? oc.itensOcorrencia : [], oc),
       })),
       tabelaAnexados: montarTabelaHistoricoAnexos(raw && raw.arquivos),
       anexos: (Array.isArray(raw && raw.arquivos) ? raw.arquivos : [])
