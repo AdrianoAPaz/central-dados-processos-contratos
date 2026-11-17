@@ -302,8 +302,63 @@ export function montarSecoesSolicitacoesFornecimento(solicitacoes) {
       tabelaItens,
       tabelaHistorico: montarTabelaHistorico(historico),
       anulacoes: montarAnulacoes(anulacoes),
+      tabelaItensAnulados: montarTabelaItensAnulados(anulacoes),
     }
   })
+}
+
+// Tabela final com TODOS os itens anulados da solicitação (pedido do usuário,
+// 2026-11-17): anulação de origem, item, quantidade, valor unitário e valor
+// total, mais uma linha com o total anulado. Valor total ausente no item é
+// calculado como quantidade × valor unitário quando os dois existem. Vazia
+// (sem linhas) quando nenhuma anulação trouxe itens.
+const COLUNAS_ITENS_ANULADOS = ['Anulação', 'Nº do item', 'Descrição', 'Quantidade', 'Valor unitário (R$)', 'Valor total (R$)']
+
+function montarTabelaItensAnulados(anulacoes) {
+  if (!Array.isArray(anulacoes)) return { colunas: [], linhas: [] }
+  const porCampo = (cabecalho) => CAMPOS_ITEM.find((c) => c.header === cabecalho)
+  const campoNumero = porCampo('Nº do item')
+  const campoDescricao = porCampo('Descrição')
+  const campoQuantidade = porCampo('Quantidade')
+  const campoUnitario = porCampo('Valor unitário (R$)')
+  const campoTotal = porCampo('Valor total (R$)')
+  const numeroOuNulo = (v) => {
+    const n = Number(v)
+    return v != null && v !== '' && Number.isFinite(n) ? n : null
+  }
+
+  const linhas = []
+  let somaTotal = 0
+  let temTotal = false
+  anulacoes.forEach((anulacao, indiceAnulacao) => {
+    const itens = anulacao && Array.isArray(anulacao.itens) ? anulacao.itens : []
+    const rotuloAnulacao = String((anulacao && (anulacao.numero ?? anulacao.sequencial)) ?? indiceAnulacao + 1)
+    for (const item of itens) {
+      const quantidade = extrairCampoItem(item, campoQuantidade)
+      const unitario = extrairCampoItem(item, campoUnitario)
+      let total = numeroOuNulo(extrairCampoItem(item, campoTotal))
+      if (total == null) {
+        const q = numeroOuNulo(quantidade)
+        const u = numeroOuNulo(unitario)
+        if (q != null && u != null) total = q * u
+      }
+      if (total != null) {
+        somaTotal += total
+        temTotal = true
+      }
+      linhas.push([
+        rotuloAnulacao,
+        valorTexto(extrairCampoItem(item, campoNumero)),
+        valorTexto(extrairCampoItem(item, campoDescricao)),
+        valorTexto(quantidade),
+        formatarValor(unitario),
+        formatarValor(total),
+      ])
+    }
+  })
+  if (!linhas.length) return { colunas: [], linhas: [] }
+  if (temTotal) linhas.push(['Total anulado', '', '', '', '', formatarValor(somaTotal)])
+  return { colunas: COLUNAS_ITENS_ANULADOS, linhas }
 }
 
 // Anulações de UMA solicitação de fornecimento (pedido do usuário,

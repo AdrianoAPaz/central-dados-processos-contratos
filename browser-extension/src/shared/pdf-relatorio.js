@@ -323,6 +323,12 @@ export function gerarPdfSolicitacaoFornecimento(secao) {
         cursor = desenharAviso(doc, cursor, 'Sem itens vinculados')
       }
     }
+
+    // Resumo final: todos os itens anulados desta solicitação juntos.
+    if (secao.tabelaItensAnulados.linhas.length) {
+      cursor = desenharTitulo(doc, cursor, 'Itens anulados')
+      cursor = desenharTabelaDinamica(doc, cursor, secao.tabelaItensAnulados)
+    }
   }
   return finalizarDocumento(doc)
 }

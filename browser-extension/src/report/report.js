@@ -242,6 +242,15 @@ async function carregar() {
             bloco.appendChild(semItens)
           }
         }
+
+        // Resumo final: todos os itens anulados desta solicitação juntos.
+        const tabelaItensAnulados = criarTabelaDinamica(secao.tabelaItensAnulados)
+        if (tabelaItensAnulados) {
+          const h4Resumo = document.createElement('h4')
+          h4Resumo.textContent = formatarTitulo('Itens anulados')
+          bloco.appendChild(h4Resumo)
+          bloco.appendChild(tabelaItensAnulados)
+        }
       }
 
       container.appendChild(bloco)
