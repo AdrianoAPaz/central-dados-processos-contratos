@@ -307,7 +307,22 @@ export function gerarPdfSolicitacaoFornecimento(secao) {
   // Trilha de auditoria: quem registrou cada situação e quando.
   if (secao.tabelaHistorico.linhas.length) {
     cursor = desenharTitulo(doc, cursor, 'Histórico')
-    desenharTabelaDinamica(doc, cursor, secao.tabelaHistorico)
+    cursor = desenharTabelaDinamica(doc, cursor, secao.tabelaHistorico)
+  }
+
+  // Anulações da solicitação (pedido do usuário, 2026-11-17): campos de cada
+  // uma e os itens anulados. Só sai quando existe alguma.
+  if (secao.anulacoes.length) {
+    cursor = desenharTitulo(doc, cursor, `Anulações (${secao.anulacoes.length})`)
+    for (const anulacao of secao.anulacoes) {
+      cursor = desenharTitulo(doc, cursor, anulacao.titulo)
+      cursor = desenharTabelaCampos(doc, cursor, anulacao.campos)
+      if (anulacao.tabelaItens.linhas.length) {
+        cursor = desenharTabelaDinamica(doc, cursor, anulacao.tabelaItens)
+      } else {
+        cursor = desenharAviso(doc, cursor, 'Sem itens vinculados')
+      }
+    }
   }
   return finalizarDocumento(doc)
 }

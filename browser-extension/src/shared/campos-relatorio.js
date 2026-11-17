@@ -293,11 +293,32 @@ export function montarSecoesSolicitacoesFornecimento(solicitacoes) {
     // fornecimento 197/2026" pra solicitação 197 de 2026 (sem a palavra
     // "relatório").
     const titulo = `solicitação de fornecimento ${numero ?? index + 1}`
-    const { itens, recebimentos: _recebimentos, historico, ...demaisCampos } = raw || {}
+    const { itens, recebimentos: _recebimentos, historico, anulacoes, ...demaisCampos } = raw || {}
     const campos = camposDinamicos(demaisCampos, raw)
     const tabelaItens = montarTabelaItens(itens)
-    return { titulo, campos, tabelaItens, tabelaHistorico: montarTabelaHistorico(historico) }
+    return {
+      titulo,
+      campos,
+      tabelaItens,
+      tabelaHistorico: montarTabelaHistorico(historico),
+      anulacoes: montarAnulacoes(anulacoes),
+    }
   })
+}
+
+// Anulações de UMA solicitação de fornecimento (pedido do usuário,
+// 2026-11-17): cada anulação é um bloco com TODOS os campos que a API devolveu
+// (catálogo não confirmado ao vivo, mesmo princípio dos recebimentos) e, logo
+// abaixo, os itens anulados. `solFornec`/`solicitacaoFornecimento` ficam de
+// fora porque a solicitação já é o contexto da seção. Sem anulação, lista
+// vazia — a seção então não mostra nada.
+function montarAnulacoes(anulacoes) {
+  if (!Array.isArray(anulacoes)) return []
+  return anulacoes.map((raw, index) => ({
+    titulo: `anulação ${(raw && (raw.numero ?? raw.sequencial)) ?? index + 1}`,
+    campos: montarCamposRecebimento(raw),
+    tabelaItens: montarTabelaItens(raw && raw.itens),
+  }))
 }
 
 // Histórico de um registro (tela "Histórico" do Betha) — trilha de auditoria:
