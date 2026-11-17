@@ -219,6 +219,40 @@ async function carregar() {
         bloco.appendChild(tabelaHistoricoSf)
       }
 
+      // Anulações desta solicitação — cada uma com todos os campos e os itens
+      // anulados. Só aparece quando existe alguma.
+      if (secao.anulacoes.length) {
+        const h4Anulacoes = document.createElement('h4')
+        h4Anulacoes.textContent = formatarTitulo(`Anulações (${secao.anulacoes.length})`)
+        bloco.appendChild(h4Anulacoes)
+
+        for (const anulacao of secao.anulacoes) {
+          const h4Anulacao = document.createElement('h4')
+          h4Anulacao.textContent = formatarTitulo(anulacao.titulo)
+          bloco.appendChild(h4Anulacao)
+          bloco.appendChild(criarTabelaCampos(anulacao.campos))
+
+          const tabelaItensAnulacao = criarTabelaDinamica(anulacao.tabelaItens)
+          if (tabelaItensAnulacao) {
+            bloco.appendChild(tabelaItensAnulacao)
+          } else {
+            const semItens = document.createElement('p')
+            semItens.className = 'sem-itens'
+            semItens.textContent = `${anulacao.titulo} sem itens vinculados`
+            bloco.appendChild(semItens)
+          }
+        }
+
+        // Resumo final: todos os itens anulados desta solicitação juntos.
+        const tabelaItensAnulados = criarTabelaDinamica(secao.tabelaItensAnulados)
+        if (tabelaItensAnulados) {
+          const h4Resumo = document.createElement('h4')
+          h4Resumo.textContent = formatarTitulo('Itens anulados')
+          bloco.appendChild(h4Resumo)
+          bloco.appendChild(tabelaItensAnulados)
+        }
+      }
+
       container.appendChild(bloco)
     }
   }

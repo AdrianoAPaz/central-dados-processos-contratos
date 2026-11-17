@@ -512,6 +512,28 @@ async function comDetalhes(contrato) {
       })
       const historico = (respHistorico && !respHistorico.erro && respHistorico.historico) || []
 
+      // Anulações da solicitação (e os itens anulados) — best-effort, como o
+      // histórico: erro vira "sem anulações", não trava o relatório.
+      const respAnulacoes = await chrome.runtime.sendMessage({
+        type: 'buscar-anulacoes-solicitacao',
+        contratoId: contrato.id,
+        solicitacaoId: sf.id,
+      })
+      const anulacoesBrutas = (respAnulacoes && !respAnulacoes.erro && respAnulacoes.anulacoes) || []
+      const anulacoes = await Promise.all(
+        anulacoesBrutas.map(async (anulacao) => {
+          if (Array.isArray(anulacao.itens) && anulacao.itens.length) return anulacao
+          if (anulacao.id == null) return { ...anulacao, itens: [] }
+          const respItensAnulacao = await chrome.runtime.sendMessage({
+            type: 'buscar-itens-anulacao',
+            contratoId: contrato.id,
+            solicitacaoId: sf.id,
+            anulacaoId: anulacao.id,
+          })
+          return { ...anulacao, itens: (respItensAnulacao && !respItensAnulacao.erro && respItensAnulacao.itens) || [] }
+        }),
+      )
+
       const resp = await chrome.runtime.sendMessage({
         type: 'buscar-recebimentos',
         contratoId: contrato.id,
@@ -532,7 +554,7 @@ async function comDetalhes(contrato) {
           return { ...recebimento, itens: (respItens && respItens.itens) || [] }
         }),
       )
-      return { ...sf, itens: ordenarItensPorNumero(itensSf), historico, recebimentos: recebimentosComItens }
+      return { ...sf, itens: ordenarItensPorNumero(itensSf), historico, anulacoes, recebimentos: recebimentosComItens }
     }),
   )
 

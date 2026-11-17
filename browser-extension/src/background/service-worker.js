@@ -195,6 +195,33 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
 
+  // Anulações de UMA solicitação de fornecimento (pedido do usuário,
+  // 2026-11-17). Best-effort: caminho conjecturado no mesmo padrão dos demais
+  // sub-recursos (`.../solicitacoesfornecimento/{sfId}/anulacoes`), NÃO
+  // confirmado ao vivo por não haver sessão disponível pra testar. 404/400
+  // vira "sem anulações" (ver buscarSubrecurso) — se a tela do Betha mostrar
+  // anulações e o relatório sair sem, é o primeiro lugar a corrigir.
+  if (message.type === 'buscar-anulacoes-solicitacao') {
+    buscarSubrecurso(
+      `${ENDPOINT_CONTRATACOES}/${limparId(message.contratoId)}/solicitacoesfornecimento/${limparId(message.solicitacaoId)}/anulacoes`,
+    )
+      .then((anulacoes) => sendResponse({ anulacoes }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
+  // Itens de UMA anulação (o que foi anulado da solicitação). Mesmo critério
+  // best-effort do sub-recurso acima, e só é chamado quando a anulação não
+  // trouxe `itens` na própria listagem.
+  if (message.type === 'buscar-itens-anulacao') {
+    buscarSubrecurso(
+      `${ENDPOINT_CONTRATACOES}/${limparId(message.contratoId)}/solicitacoesfornecimento/${limparId(message.solicitacaoId)}/anulacoes/${limparId(message.anulacaoId)}/itens`,
+    )
+      .then((itens) => sendResponse({ itens }))
+      .catch((e) => sendResponse({ erro: String((e && e.message) || e) }))
+    return true
+  }
+
   // Histórico de UMA interação contábil (popover "Últimas alterações" do
   // Betha, confirmado ao vivo em 2026-10-29): GET contratacoes/{id}/
   // interacaocontabil/{interacaoId}/integracaocontabildados — cada registro
